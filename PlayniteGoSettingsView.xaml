@@ -1,0 +1,59 @@
+﻿<UserControl x:Class="PlayniteGo.PlayniteGoSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             mc:Ignorable="d" 
+             d:DesignHeight="550" d:DesignWidth="600">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="20">
+            <TextBlock Text="Export Settings" FontWeight="Bold" Margin="0,0,0,10"/>
+            <TextBlock Text="{Binding DebugMessage}" Margin="0,0,0,10" Foreground="Red"/>
+
+            <TextBlock Text="Image Format" Margin="0,10,0,5" FontWeight="SemiBold"/>
+            <TextBlock TextWrapping="Wrap" Margin="0,0,0,5" FontStyle="Italic" Foreground="Gray">
+                WebP offers the best compression. JPEG is for maximum compatibility. "Copy Original" is fastest but results in larger file sizes.
+            </TextBlock>
+            <ComboBox ItemsSource="{Binding ImageExportFormatOptions}" SelectedItem="{Binding ImageExportFormat}" />
+
+            <TextBlock Text="Image Quality" Margin="0,15,0,5" FontWeight="SemiBold"/>
+            <TextBlock TextWrapping="Wrap" Margin="0,0,0,5" FontStyle="Italic" Foreground="Gray">
+                Applies to WebP and JPEG formats. 80 is a good balance of quality and size.
+            </TextBlock>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Slider Grid.Column="0" VerticalAlignment="Center" Minimum="1" Maximum="100" Value="{Binding ImageQuality}" IsSnapToTickEnabled="True" TickFrequency="1" />
+                <TextBox Grid.Column="1" Text="{Binding ImageQuality, UpdateSourceTrigger=PropertyChanged}" Width="40" Margin="10,0,0,0" />
+            </Grid>
+
+            <TextBlock Text="Max Cover Image Width (pixels)" Margin="0,15,0,5" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding CoverWidth, UpdateSourceTrigger=PropertyChanged}" />
+
+            <TextBlock Text="Max Background Image Width (pixels)" Margin="0,15,0,5" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding BackgroundWidth, UpdateSourceTrigger=PropertyChanged}" />
+
+            <Separator Margin="0,25,0,20" />
+
+            <TextBlock Text="Plugin Folder Paths" FontWeight="Bold" Margin="0,0,0,10"/>
+            <TextBlock TextWrapping="Wrap" Margin="0,0,0,20">
+                This plugin reads data from other extensions. It will try to find them automatically. If an auto-detected path is incorrect, you can manually enter the full path to the extension's user data folder below.
+            </TextBlock>
+
+            <TextBlock Text="Extra Metadata Tools Folder Path" Margin="0,10,0,5" FontWeight="SemiBold"/>
+            <TextBlock Text="Auto-Detected:" Margin="0,0,0,2"/>
+            <TextBlock Text="{Binding AutoDetectedExtraMetadataPath}" FontStyle="Italic" Foreground="Gray" TextWrapping="Wrap" />
+            <TextBox Text="{Binding ExtraMetadataFolderPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,0" />
+            <TextBlock Text="Manual override. Leave blank to use the auto-detected path." FontStyle="Italic" Foreground="Gray" Margin="0,2,0,0"/>
+
+            <TextBlock Text="HowLongToBeat Folder Path" Margin="0,20,0,5" FontWeight="SemiBold"/>
+            <TextBlock Text="Auto-Detected:" Margin="0,0,0,2"/>
+            <TextBlock Text="{Binding AutoDetectedHltbPath}" FontStyle="Italic" Foreground="Gray" TextWrapping="Wrap" />
+            <TextBox Text="{Binding HowLongToBeatFolderPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,0" />
+            <TextBlock Text="Manual override. Leave blank to use the auto-detected path." FontStyle="Italic" Foreground="Gray" Margin="0,2,0,0"/>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

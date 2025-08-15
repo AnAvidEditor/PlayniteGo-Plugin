@@ -1,0 +1,29 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:System="clr-namespace:System;assembly=mscorlib">
+
+    <!-- Main Menu Items -->
+    <System:String x:Key="LOC_PlayniteiOSExporter_MenuItemDescription">Export Library for iOS</System:String>
+
+    <!-- Dialogs and Messages -->
+    <System:String x:Key="LOC_PlayniteiOSExporter_ExportPathNotConfiguredError">Export folder is not configured. Please set the path first.</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_ExportErrorTitle">Export Error</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_NoGamesFoundMessage">No games found in your library to export.</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_ExportCanceledTitle">Export Canceled</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_ProgressDialogTitle">Exporting Playnite Library for iOS...</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_ProgressText">Exporting: {0}</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_ExportCompleteMessage">Successfully exported {0} games to {1}.</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_ExportCompleteTitle">Export Complete</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_GenericError">An error occurred during export. Check Playnite logs for details.</System:String>
+
+    <!-- Settings View -->
+    <System:String x:Key="LOC_PlayniteiOSExporter_ExportFolderLocation">Export Folder Location</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_BrowseButtonContent">Browse...</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_ExportFolderDescription">Select the folder where the library data (library.json and images subfolder) will be saved.</System:String>
+
+    <!-- Settings Validation Errors -->
+    <System:String x:Key="LOC_PlayniteiOSExporter_SettingsValidation_ExportPathEmpty">Export path cannot be empty.</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_SettingsValidation_ExportPathDoesNotExist">Export path '{0}' does not exist.</System:String>
+    <System:String x:Key="LOC_PlayniteiOSExporter_SettingsValidation_ExportPathNotWritable">Export path is not writable: {0}</System:String>
+
+</ResourceDictionary>
