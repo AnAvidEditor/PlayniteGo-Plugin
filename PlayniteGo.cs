@@ -107,8 +107,6 @@ namespace PlayniteGo
         public List<string> AgeRatings { get; set; }
         public List<string> Regions { get; set; }
         public List<string> Categories { get; set; }
-
-        // --- ADDED PROPERTIES ---
         public RangeData PlaytimeRange { get; set; }
         public RangeData ReleaseYearRange { get; set; }
         public RangeData InstallSizeRange { get; set; }
@@ -194,13 +192,10 @@ namespace PlayniteGo
             public List<Movie> Movies { get; set; }
             [SerializationPropertyName("pc_requirements")] public Requirements PcRequirements { get; set; }
             [SerializationPropertyName("price_overview")] public PriceOverview PriceOverview { get; set; }
-
             [SerializationPropertyName("dlc")] public List<int> DlcList1 { get; set; }
             [SerializationPropertyName("packages")] public List<int> DlcList2 { get; set; }
-
             [DontSerialize]
             public List<int> Dlc => DlcList1 ?? DlcList2;
-
             public Achievements Achievements { get; set; }
             [SerializationPropertyName("ratings")] public Ratings Ratings { get; set; }
             public Metacritic Metacritic { get; set; }
@@ -406,26 +401,74 @@ namespace PlayniteGo
                     catch { return null; }
                 };
 
-                // --- START OF UPDATED LOGIC ---
+                // ✅ --- START OF OPTIMIZED DATA AGGREGATION ---
 
-                // 1. Calculate lists of unique values
+                args.Text = "Analyzing library...";
+                args.IsIndeterminate = true;
+
+                var playedGames = new List<Game>();
+                var unplayedGames = new List<Game>();
+
+                var uniqueSources = new HashSet<string>();
+                var uniqueCompletionStatuses = new HashSet<string>();
+                var uniquePlatforms = new HashSet<string>();
+                var uniqueGenres = new HashSet<string>();
+                var uniqueDevelopers = new HashSet<string>();
+                var uniquePublishers = new HashSet<string>();
+                var uniqueFeatures = new HashSet<string>();
+                var uniqueTags = new HashSet<string>();
+                var uniqueSeries = new HashSet<string>();
+                var uniqueAgeRatings = new HashSet<string>();
+                var uniqueRegions = new HashSet<string>();
+                var uniqueCategories = new HashSet<string>();
+
+                var developerLookup = new Dictionary<string, List<Guid>>();
+                var publisherLookup = new Dictionary<string, List<Guid>>();
+                var seriesLookup = new Dictionary<string, List<Guid>>();
+
+                // ✅ This single loop gathers all data needed for filters, stats, and lookups.
+                foreach (var game in allGamesInLibrary)
+                {
+                    // Stats categorization
+                    if (game.Playtime > 0) { playedGames.Add(game); }
+                    else { unplayedGames.Add(game); }
+
+                    // Filter options
+                    if (game.Source != null) uniqueSources.Add(game.Source.Name);
+                    if (game.CompletionStatus != null) uniqueCompletionStatuses.Add(game.CompletionStatus.Name);
+                    if (game.Platforms != null) foreach (var p in game.Platforms) uniquePlatforms.Add(p.Name);
+                    if (game.Genres != null) foreach (var g in game.Genres) uniqueGenres.Add(g.Name);
+                    if (game.Developers != null) foreach (var d in game.Developers) uniqueDevelopers.Add(d.Name);
+                    if (game.Publishers != null) foreach (var p in game.Publishers) uniquePublishers.Add(p.Name);
+                    if (game.Features != null) foreach (var f in game.Features) uniqueFeatures.Add(f.Name);
+                    if (game.Tags != null) foreach (var t in game.Tags) uniqueTags.Add(t.Name);
+                    if (game.Series != null) foreach (var s in game.Series) uniqueSeries.Add(s.Name);
+                    if (game.AgeRatings != null) foreach (var a in game.AgeRatings) uniqueAgeRatings.Add(a.Name);
+                    if (game.Regions != null) foreach (var r in game.Regions) uniqueRegions.Add(r.Name);
+                    if (game.Categories != null) foreach (var c in game.Categories) uniqueCategories.Add(c.Name);
+
+                    // Lookup tables for related games
+                    if (game.Developers != null) foreach (var dev in game.Developers) { if (!developerLookup.ContainsKey(dev.Name)) developerLookup[dev.Name] = new List<Guid>(); developerLookup[dev.Name].Add(game.Id); }
+                    if (game.Publishers != null) foreach (var pub in game.Publishers) { if (!publisherLookup.ContainsKey(pub.Name)) publisherLookup[pub.Name] = new List<Guid>(); publisherLookup[pub.Name].Add(game.Id); }
+                    if (game.Series != null) foreach (var ser in game.Series) { if (!seriesLookup.ContainsKey(ser.Name)) seriesLookup[ser.Name] = new List<Guid>(); seriesLookup[ser.Name].Add(game.Id); }
+                }
+
                 var filterOptions = new ExportedFilterOptions
                 {
-                    Sources = allGamesInLibrary.Where(g => g.Source != null).Select(g => g.Source.Name).Distinct().OrderBy(n => n).ToList(),
-                    CompletionStatuses = allGamesInLibrary.Where(g => g.CompletionStatus != null).Select(g => g.CompletionStatus.Name).Distinct().OrderBy(n => n).ToList(),
-                    Platforms = allGamesInLibrary.Where(g => g.Platforms != null).SelectMany(g => g.Platforms).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                    Genres = allGamesInLibrary.Where(g => g.Genres != null).SelectMany(g => g.Genres).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                    Developers = allGamesInLibrary.Where(g => g.Developers != null).SelectMany(g => g.Developers).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                    Publishers = allGamesInLibrary.Where(g => g.Publishers != null).SelectMany(g => g.Publishers).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                    Features = allGamesInLibrary.Where(g => g.Features != null).SelectMany(g => g.Features).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                    Tags = allGamesInLibrary.Where(g => g.Tags != null).SelectMany(g => g.Tags).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                    Series = allGamesInLibrary.Where(g => g.Series != null).SelectMany(g => g.Series).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                    AgeRatings = allGamesInLibrary.Where(g => g.AgeRatings != null).SelectMany(g => g.AgeRatings).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                    Regions = allGamesInLibrary.Where(g => g.Regions != null).SelectMany(g => g.Regions).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                    Categories = allGamesInLibrary.Where(g => g.Categories != null).SelectMany(g => g.Categories).Select(p => p.Name).Distinct().OrderBy(n => n).ToList()
+                    Sources = uniqueSources.OrderBy(n => n).ToList(),
+                    CompletionStatuses = uniqueCompletionStatuses.OrderBy(n => n).ToList(),
+                    Platforms = uniquePlatforms.OrderBy(n => n).ToList(),
+                    Genres = uniqueGenres.OrderBy(n => n).ToList(),
+                    Developers = uniqueDevelopers.OrderBy(n => n).ToList(),
+                    Publishers = uniquePublishers.OrderBy(n => n).ToList(),
+                    Features = uniqueFeatures.OrderBy(n => n).ToList(),
+                    Tags = uniqueTags.OrderBy(n => n).ToList(),
+                    Series = uniqueSeries.OrderBy(n => n).ToList(),
+                    AgeRatings = uniqueAgeRatings.OrderBy(n => n).ToList(),
+                    Regions = uniqueRegions.OrderBy(n => n).ToList(),
+                    Categories = uniqueCategories.OrderBy(n => n).ToList()
                 };
 
-                // 2. Calculate min/max for ranges
                 var gamesWithReleaseYear = allGamesInLibrary.Where(g => g.ReleaseDate != null).Select(g => g.ReleaseDate.Value.Year).ToList();
                 var gamesWithHltb = allGamesInLibrary.Select(g => getHltbData(g)?.TimeData?.MainStoryAverage ?? 0).Where(t => t > 0).ToList();
 
@@ -435,17 +478,14 @@ namespace PlayniteGo
                 int maxInstallSizeGb = allGamesInLibrary.Any(g => g.InstallSize > 0) ? (int)Math.Ceiling(allGamesInLibrary.Max(g => g.InstallSize ?? 0) / 1073741824.0) : 1;
                 int maxHltbHours = gamesWithHltb.Any() ? (int)Math.Ceiling(gamesWithHltb.Max() / 3600.0) : 1;
 
-                // 3. Add ranges to the filterOptions object
                 filterOptions.PlaytimeRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxPlaytimeHours) };
                 filterOptions.ReleaseYearRange = new RangeData { LowerBound = minReleaseYear, UpperBound = maxReleaseYear };
                 filterOptions.InstallSizeRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxInstallSizeGb) };
                 filterOptions.HltbMainStoryRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxHltbHours) };
 
-                // --- END OF UPDATED LOGIC ---
-
                 Func<List<Game>, SummaryStats> calculateSummaryStats = (games) =>
                 {
-                    if (!games.Any()) return new SummaryStats { TotalGames = 0 };
+                    if (!games.Any()) return new SummaryStats { TotalGames = 0, CompletionStatusCounts = new List<CountData>(), AllPlatforms = new List<CountData>() };
 
                     var playedGamesStats = games.Where(g => g.Playtime > 0).ToList();
                     var gamesWithReleaseDate = games.Where(g => g.ReleaseDate != null).ToList();
@@ -487,12 +527,9 @@ namespace PlayniteGo
                     };
                 };
 
-                var playedGames = allGamesInLibrary.Where(g => g.Playtime > 0).ToList();
-                var unplayedGames = allGamesInLibrary.Where(g => g.Playtime == 0).ToList();
                 var backlogGames = unplayedGames.Select(g => new { Game = g, Hltb = getHltbData(g) }).Where(x => x.Hltb?.TimeData?.MainStoryAverage > 0).ToList();
                 var longestBacklogGame = backlogGames.OrderByDescending(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
                 var shortestBacklogGame = backlogGames.Where(g => g.Hltb.TimeData.MainStoryAverage > 0).OrderBy(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
-
                 long totalBacklogSeconds = backlogGames.Sum(g => (long)g.Hltb.TimeData.MainStoryAverage);
 
                 payload.Stats = new ExportedStats
@@ -511,33 +548,23 @@ namespace PlayniteGo
                 };
                 payload.FilterOptions = filterOptions;
 
-                // --- END OF CALCULATION ---
+                // ✅ --- END OF OPTIMIZED DATA AGGREGATION ---
 
-                args.ProgressMaxValue = gamesToProcess.Count;
                 var tempDir = Path.Combine(Path.GetTempPath(), "PlayniteExport_" + Guid.NewGuid());
                 var imagesDir = Path.Combine(tempDir, "images");
                 Directory.CreateDirectory(imagesDir);
 
-                var developerLookup = new Dictionary<string, List<Guid>>();
-                var publisherLookup = new Dictionary<string, List<Guid>>();
-                var seriesLookup = new Dictionary<string, List<Guid>>();
-
-                foreach (var game in allGamesInLibrary)
-                {
-                    if (game.Developers != null) foreach (var dev in game.Developers) { if (!developerLookup.ContainsKey(dev.Name)) developerLookup[dev.Name] = new List<Guid>(); developerLookup[dev.Name].Add(game.Id); }
-                    if (game.Publishers != null) foreach (var pub in game.Publishers) { if (!publisherLookup.ContainsKey(pub.Name)) publisherLookup[pub.Name] = new List<Guid>(); publisherLookup[pub.Name].Add(game.Id); }
-                    if (game.Series != null) foreach (var ser in game.Series) { if (!seriesLookup.ContainsKey(ser.Name)) seriesLookup[ser.Name] = new List<Guid>(); seriesLookup[ser.Name].Add(game.Id); }
-                }
-
                 try
                 {
+                    args.ProgressMaxValue = gamesToProcess.Count;
+                    args.IsIndeterminate = false; // Switch to determinate progress for game processing.
                     var processedGames = new ConcurrentBag<GameExport>();
                     int progress = 0;
 
                     Parallel.ForEach(gamesToProcess, (game) =>
                     {
                         if (args.CancelToken.IsCancellationRequested) return;
-                        var gameExport = CreateGameExport(game, extraMetaPath, hltbPath, imagesDir, developerLookup, publisherLookup, seriesLookup);
+                        var gameExport = CreateGameExport(game, extraMetaPath, hltbPath, imagesDir, developerLookup, publisherLookup, seriesLookup, currentIds);
                         if (gameExport != null) processedGames.Add(gameExport);
                         Interlocked.Increment(ref progress);
                         args.CurrentProgressValue = progress;
@@ -582,7 +609,8 @@ namespace PlayniteGo
         private GameExport CreateGameExport(Game game, string extraMetaPath, string hltbPath, string imagesDir,
             Dictionary<string, List<Guid>> developerLookup,
             Dictionary<string, List<Guid>> publisherLookup,
-            Dictionary<string, List<Guid>> seriesLookup)
+            Dictionary<string, List<Guid>> seriesLookup,
+            HashSet<Guid> allExportedGameIds)
         {
             var gameExport = new GameExport
             {
@@ -627,7 +655,7 @@ namespace PlayniteGo
                     {
                         foreach (var id in ids)
                         {
-                            if (id != game.Id) // Exclude the current game itself
+                            if (id != game.Id && allExportedGameIds.Contains(id))
                             {
                                 relatedDeveloperIds.Add(id);
                             }
@@ -646,7 +674,7 @@ namespace PlayniteGo
                     {
                         foreach (var id in ids)
                         {
-                            if (id != game.Id) // Exclude the current game itself
+                            if (id != game.Id && allExportedGameIds.Contains(id))
                             {
                                 relatedPublisherIds.Add(id);
                             }
@@ -665,7 +693,7 @@ namespace PlayniteGo
                     {
                         foreach (var id in ids)
                         {
-                            if (id != game.Id) // Exclude the current game itself
+                            if (id != game.Id && allExportedGameIds.Contains(id))
                             {
                                 relatedSeriesIds.Add(id);
                             }
@@ -920,7 +948,6 @@ namespace PlayniteGo
 
         public override UserControl GetSettingsView(bool firstRunSettings)
         {
-            // This class's constructor requires the 'settings' view model.
             return new PlayniteGoSettingsView(settings);
         }
     }
