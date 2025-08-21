@@ -1,4 +1,4 @@
-﻿using Playnite.SDK;
+using Playnite.SDK;
 using Playnite.SDK.Data;
 using Playnite.SDK.Models;
 using Playnite.SDK.Plugins;
@@ -161,13 +161,6 @@ namespace PlayniteGo
         public List<string> Tags { get; set; }
         public DateTime? ReleaseDate { get; set; }
         public ulong? InstallSize { get; set; }
-        public List<SteamApi.Screenshot> Screenshots { get; set; }
-        public List<SteamApi.Movie> Movies { get; set; }
-        public SteamApi.Requirements PcRequirements { get; set; }
-        public SteamApi.PriceOverview PriceOverview { get; set; }
-        public List<int> Dlc { get; set; }
-        public SteamApi.Achievements Achievements { get; set; }
-        public SteamApi.Metacritic Metacritic { get; set; }
         public HltbApi.HltbDataItem HowLongToBeatData { get; set; }
         public List<string> Categories { get; set; }
         public List<string> Regions { get; set; }
@@ -180,39 +173,6 @@ namespace PlayniteGo
     {
         public string Name { get; set; }
         public string Url { get; set; }
-    }
-
-    namespace SteamApi
-    {
-        public class AppDetailsContainer { public AppDetails Data { get; set; } }
-
-        public class AppDetails
-        {
-            public List<Screenshot> Screenshots { get; set; }
-            public List<Movie> Movies { get; set; }
-            [SerializationPropertyName("pc_requirements")] public Requirements PcRequirements { get; set; }
-            [SerializationPropertyName("price_overview")] public PriceOverview PriceOverview { get; set; }
-            [SerializationPropertyName("dlc")] public List<int> DlcList1 { get; set; }
-            [SerializationPropertyName("packages")] public List<int> DlcList2 { get; set; }
-            [DontSerialize]
-            public List<int> Dlc => DlcList1 ?? DlcList2;
-            public Achievements Achievements { get; set; }
-            [SerializationPropertyName("ratings")] public Ratings Ratings { get; set; }
-            public Metacritic Metacritic { get; set; }
-        }
-
-        public class Ratings
-        {
-            [SerializationPropertyName("metacritic")]
-            public Metacritic Metacritic { get; set; }
-        }
-
-        public class Screenshot { [SerializationPropertyName("path_thumbnail")] public string Thumbnail { get; set; } [SerializationPropertyName("path_full")] public string FullImage { get; set; } }
-        public class Movie { public string Name { get; set; } public string Thumbnail { get; set; } [SerializationPropertyName("mp4")] public Dictionary<string, string> Mp4Urls { get; set; } }
-        public class Requirements { public string Minimum { get; set; } public string Recommended { get; set; } }
-        public class PriceOverview { [SerializationPropertyName("final_formatted")] public string FinalFormatted { get; set; } }
-        public class Achievements { public int Total { get; set; } }
-        public class Metacritic { public int Score { get; set; } }
     }
 
     namespace HltbApi
@@ -255,7 +215,6 @@ namespace PlayniteGo
         private enum ImageType { Cover, Background }
 
         public static Guid steamPluginId = Guid.Parse("cb91dfc9-b977-43bf-8e70-55f46e410fab");
-        public static Guid extraMetadataPluginId = Guid.Parse("705fdbca-e1fc-4004-b839-1d040b8b4429");
         public static Guid hltbPluginId = Guid.Parse("e08cd51f-9c9a-4ee3-a094-fde03b55492f");
 
         public PlayniteGo(IPlayniteAPI api) : base(api)
@@ -285,7 +244,7 @@ namespace PlayniteGo
 
         private void PerformFullExport()
         {
-            if (!CheckPrerequisites(out string extraMetaPath, out string hltbPath, out bool extraMetaFound, out bool hltbFound)) return;
+            if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
 
             var allGames = PlayniteApi.Database.Games.ToList();
             if (!allGames.Any())
@@ -295,7 +254,6 @@ namespace PlayniteGo
             }
 
             string confirmationMessage = "Proceed with full export?\n\n";
-            confirmationMessage += $"Extra Metadata Tools data: {(extraMetaFound ? "Found" : "Not Found")}\n";
             confirmationMessage += $"HowLongToBeat data: {(hltbFound ? "Found" : "Not Found")}\n\n";
             confirmationMessage += "Click Yes to continue.";
 
@@ -307,12 +265,12 @@ namespace PlayniteGo
             var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
             if (string.IsNullOrEmpty(result)) return;
 
-            ExecuteFullExport(allGames, result, extraMetaPath, hltbPath, "Full library export...");
+            ExecuteFullExport(allGames, result, hltbPath, "Full library export...");
         }
 
         private void PerformIncrementalExport()
         {
-            if (!CheckPrerequisites(out string extraMetaPath, out string hltbPath, out bool extraMetaFound, out bool hltbFound)) return;
+            if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
 
             var lastExportDate = LoadLastExportDate();
             if (lastExportDate == DateTime.MinValue)
@@ -336,7 +294,6 @@ namespace PlayniteGo
             }
 
             string confirmationMessage = "Proceed with incremental export?\n\n";
-            confirmationMessage += $"Extra Metadata Tools data: {(extraMetaFound ? "Found" : "Not Found")}\n";
             confirmationMessage += $"HowLongToBeat data: {(hltbFound ? "Found" : "Not Found")}\n\n";
             confirmationMessage += "Click Yes to continue.";
 
@@ -348,23 +305,23 @@ namespace PlayniteGo
             var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
             if (string.IsNullOrEmpty(result)) return;
 
-            ExecuteIncrementalExport(gamesToUpdate, deletedGameIds, result, extraMetaPath, hltbPath, "Syncing library changes...");
+            ExecuteIncrementalExport(gamesToUpdate, deletedGameIds, result, hltbPath, "Syncing library changes...");
         }
 
-        private void ExecuteFullExport(List<Game> gamesToProcess, string exportZipPath, string extraMetaPath, string hltbPath, string progressMessage)
+        private void ExecuteFullExport(List<Game> gamesToProcess, string exportZipPath, string hltbPath, string progressMessage)
         {
             var allGameIds = Enumerable.ToHashSet(gamesToProcess.Select(g => g.Id));
             var payload = new ExportPayload { Games = new List<GameExport>() };
             var exportDate = DateTime.UtcNow;
 
-            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, allGameIds, extraMetaPath, hltbPath, progressMessage, exportDate);
+            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, allGameIds, hltbPath, progressMessage, exportDate);
             if (success)
             {
                 PlayniteApi.Dialogs.ShowMessage($"Successfully exported {payload.Games.Count} games.", "Export Complete");
             }
         }
 
-        private void ExecuteIncrementalExport(List<Game> gamesToProcess, List<Guid> deletedGameIds, string exportZipPath, string extraMetaPath, string hltbPath, string progressMessage)
+        private void ExecuteIncrementalExport(List<Game> gamesToProcess, List<Guid> deletedGameIds, string exportZipPath, string hltbPath, string progressMessage)
         {
             var currentIds = Enumerable.ToHashSet(PlayniteApi.Database.Games.Select(g => g.Id));
             var payload = new ExportPayload
@@ -374,14 +331,14 @@ namespace PlayniteGo
             };
             var exportDate = DateTime.UtcNow;
 
-            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, currentIds, extraMetaPath, hltbPath, progressMessage, exportDate);
+            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, currentIds, hltbPath, progressMessage, exportDate);
             if (success)
             {
                 PlayniteApi.Dialogs.ShowMessage($"Successfully synced {payload.UpdatedGames.Count} updates and {payload.DeletedGameIds.Count} deletions.", "Sync Complete");
             }
         }
 
-        private bool ProcessAndZip(List<Game> gamesToProcess, ExportPayload payload, string exportZipPath, HashSet<Guid> currentIds, string extraMetaPath, string hltbPath, string progressMessage, DateTime exportDate)
+        private bool ProcessAndZip(List<Game> gamesToProcess, ExportPayload payload, string exportZipPath, HashSet<Guid> currentIds, string hltbPath, string progressMessage, DateTime exportDate)
         {
             bool wasSuccess = false;
             PlayniteApi.Dialogs.ActivateGlobalProgress(args =>
@@ -430,8 +387,7 @@ namespace PlayniteGo
                 foreach (var game in allGamesInLibrary)
                 {
                     // Stats categorization
-                    if (game.Playtime > 0) { playedGames.Add(game); }
-                    else { unplayedGames.Add(game); }
+                    if (game.Playtime > 0) { playedGames.Add(game); } else { unplayedGames.Add(game); }
 
                     // Filter options
                     if (game.Source != null) uniqueSources.Add(game.Source.Name);
@@ -564,7 +520,7 @@ namespace PlayniteGo
                     Parallel.ForEach(gamesToProcess, (game) =>
                     {
                         if (args.CancelToken.IsCancellationRequested) return;
-                        var gameExport = CreateGameExport(game, extraMetaPath, hltbPath, imagesDir, developerLookup, publisherLookup, seriesLookup, currentIds);
+                        var gameExport = CreateGameExport(game, hltbPath, imagesDir, developerLookup, publisherLookup, seriesLookup, currentIds);
                         if (gameExport != null) processedGames.Add(gameExport);
                         Interlocked.Increment(ref progress);
                         args.CurrentProgressValue = progress;
@@ -606,7 +562,9 @@ namespace PlayniteGo
             return wasSuccess;
         }
 
-        private GameExport CreateGameExport(Game game, string extraMetaPath, string hltbPath, string imagesDir,
+
+
+        private GameExport CreateGameExport(Game game, string hltbPath, string imagesDir,
             Dictionary<string, List<Guid>> developerLookup,
             Dictionary<string, List<Guid>> publisherLookup,
             Dictionary<string, List<Guid>> seriesLookup,
@@ -703,32 +661,6 @@ namespace PlayniteGo
             }
             gameExport.RelatedSeriesGameIds = relatedSeriesIds.Select(id => id.ToString()).ToList();
 
-            if (!string.IsNullOrEmpty(extraMetaPath) && game.PluginId == steamPluginId) // Steam
-            {
-                string steamDetailsPath = Path.Combine(extraMetaPath, $"{game.Id}_SteamAppDetails.json");
-                if (File.Exists(steamDetailsPath))
-                {
-                    try
-                    {
-                        var rawText = File.ReadAllText(steamDetailsPath);
-                        var rawData = Serialization.FromJson<Dictionary<string, SteamApi.AppDetailsContainer>>(rawText);
-                        var container = rawData?.Values.FirstOrDefault();
-                        if (container?.Data != null)
-                        {
-                            var steamData = container.Data;
-                            gameExport.Screenshots = steamData.Screenshots;
-                            gameExport.Movies = steamData.Movies;
-                            gameExport.PcRequirements = steamData.PcRequirements;
-                            gameExport.PriceOverview = steamData.PriceOverview;
-                            gameExport.Dlc = steamData.Dlc;
-                            gameExport.Achievements = steamData.Achievements;
-                            gameExport.Metacritic = steamData.Ratings?.Metacritic ?? steamData.Metacritic;
-                        }
-                    }
-                    catch (Exception ex) { logger.Error(ex, $"Failed to parse Steam metadata for game {game.Name} ({game.Id})."); }
-                }
-            }
-
             if (!string.IsNullOrEmpty(hltbPath))
             {
                 string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
@@ -746,19 +678,10 @@ namespace PlayniteGo
             return gameExport;
         }
 
-        private bool CheckPrerequisites(out string extraMetaPath, out string hltbPath, out bool extraMetaFound, out bool hltbFound)
+        private bool CheckPrerequisites(out string hltbPath, out bool hltbFound)
         {
-            extraMetaPath = GetEffectivePath(settings.Settings.ExtraMetadataFolderPath, extraMetadataPluginId);
             hltbPath = GetEffectivePath(settings.Settings.HowLongToBeatFolderPath, hltbPluginId);
-
-            extraMetaFound = !string.IsNullOrEmpty(extraMetaPath);
             hltbFound = !string.IsNullOrEmpty(hltbPath);
-
-            if (!extraMetaFound)
-            {
-                PlayniteApi.Dialogs.ShowMessage("Could not determine the path for the Extra Metadata plugin data. Please configure it in the settings.", "PlayniteGo");
-                return false;
-            }
 
             if (!hltbFound)
             {

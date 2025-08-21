@@ -8,6 +8,7 @@
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="20">
+
             <TextBlock Text="Export Settings" FontWeight="Bold" Margin="0,0,0,10"/>
             <TextBlock Text="{Binding DebugMessage}" Margin="0,0,0,10" Foreground="Red"/>
 
@@ -26,12 +27,14 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+
                 <Slider Grid.Column="0" VerticalAlignment="Center" Minimum="1" Maximum="100" Value="{Binding ImageQuality}" IsSnapToTickEnabled="True" TickFrequency="1" />
                 <TextBox Grid.Column="1" Text="{Binding ImageQuality, UpdateSourceTrigger=PropertyChanged}" Width="40" Margin="10,0,0,0" />
             </Grid>
 
             <TextBlock Text="Max Cover Image Width (pixels)" Margin="0,15,0,5" FontWeight="SemiBold"/>
             <TextBox Text="{Binding CoverWidth, UpdateSourceTrigger=PropertyChanged}" />
+
 
             <TextBlock Text="Max Background Image Width (pixels)" Margin="0,15,0,5" FontWeight="SemiBold"/>
             <TextBox Text="{Binding BackgroundWidth, UpdateSourceTrigger=PropertyChanged}" />
@@ -42,12 +45,6 @@
             <TextBlock TextWrapping="Wrap" Margin="0,0,0,20">
                 This plugin reads data from other extensions. It will try to find them automatically. If an auto-detected path is incorrect, you can manually enter the full path to the extension's user data folder below.
             </TextBlock>
-
-            <TextBlock Text="Extra Metadata Tools Folder Path" Margin="0,10,0,5" FontWeight="SemiBold"/>
-            <TextBlock Text="Auto-Detected:" Margin="0,0,0,2"/>
-            <TextBlock Text="{Binding AutoDetectedExtraMetadataPath}" FontStyle="Italic" Foreground="Gray" TextWrapping="Wrap" />
-            <TextBox Text="{Binding ExtraMetadataFolderPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,0" />
-            <TextBlock Text="Manual override. Leave blank to use the auto-detected path." FontStyle="Italic" Foreground="Gray" Margin="0,2,0,0"/>
 
             <TextBlock Text="HowLongToBeat Folder Path" Margin="0,20,0,5" FontWeight="SemiBold"/>
             <TextBlock Text="Auto-Detected:" Margin="0,0,0,2"/>

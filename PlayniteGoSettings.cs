@@ -1,4 +1,4 @@
-﻿using Playnite.SDK.Data;
+using Playnite.SDK.Data;
 using System.Collections.Generic;
 
 namespace PlayniteGo
@@ -6,7 +6,6 @@ namespace PlayniteGo
     public class PlayniteGoSettings : ObservableObject
     {
         // Existing settings
-        public string ExtraMetadataFolderPath { get; set; } = string.Empty;
         public string HowLongToBeatFolderPath { get; set; } = string.Empty;
 
         // --- NEW: Flexible Export Settings ---

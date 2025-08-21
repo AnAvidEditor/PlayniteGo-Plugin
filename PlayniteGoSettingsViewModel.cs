@@ -25,7 +25,6 @@ namespace PlayniteGo
         private PlayniteGoSettings editingClone;
 
         // Properties for Data Binding in the View
-        public string AutoDetectedExtraMetadataPath { get; private set; }
         public string AutoDetectedHltbPath { get; private set; }
         public List<string> ImageExportFormatOptions { get; } = new List<string> { "WebP", "JPEG", "Copy Original" };
 
@@ -86,8 +85,6 @@ namespace PlayniteGo
             var savedSettings = plugin.LoadPluginSettings<PlayniteGoSettings>();
             Settings = savedSettings ?? new PlayniteGoSettings();
 
-            AutoDetectedExtraMetadataPath = GetAutoDetectedPath("Extra Metadata Tools", PlayniteGo.extraMetadataPluginId);
-
             string hltbBasePath = GetAutoDetectedPath("HowLongToBeat", PlayniteGo.hltbPluginId);
             if (!string.IsNullOrEmpty(hltbBasePath) && Directory.Exists(hltbBasePath))
             {
@@ -142,11 +139,6 @@ namespace PlayniteGo
         public bool VerifySettings(out List<string> errors)
         {
             errors = new List<string>();
-
-            if (!string.IsNullOrEmpty(Settings.ExtraMetadataFolderPath) && !Directory.Exists(Settings.ExtraMetadataFolderPath))
-            {
-                errors.Add("Extra Metadata Folder Path is not a valid directory.");
-            }
 
             if (!string.IsNullOrEmpty(Settings.HowLongToBeatFolderPath) && !Directory.Exists(Settings.HowLongToBeatFolderPath))
             {
