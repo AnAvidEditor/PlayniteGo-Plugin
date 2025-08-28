@@ -954,7 +954,7 @@ namespace PlayniteGo
 
         private static string FormatPlaytime(ulong playtimeInSeconds)
         {
-            if (playtimeInSeconds <= 0) return null;
+            if (playtimeInSeconds <= 0) return "";
             return $"{playtimeInSeconds / 3600}h";
         }
 
