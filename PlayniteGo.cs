@@ -1128,6 +1128,7 @@ namespace PlayniteGo
             }
             sb.AppendLine();
 
+
             // --- Recent Log Entries ---
             sb.AppendLine("--- Recent Playnite Log Entries ---");
             try
