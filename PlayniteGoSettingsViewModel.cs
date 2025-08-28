@@ -1,4 +1,5 @@
-﻿using Playnite.SDK;
+﻿// START: D:\Visual Studio Projects\PlayniteGo\PlayniteGoSettingsViewModel.cs 
+using Playnite.SDK;
 using Playnite.SDK.Data;
 using System;
 using System.Collections.Generic;
@@ -33,8 +34,11 @@ namespace PlayniteGo
             get => Settings.ImageExportFormat;
             set
             {
-                Settings.ImageExportFormat = value;
-                OnPropertyChanged();
+                if (settings.ImageExportFormat != value)
+                {
+                    Settings.ImageExportFormat = value;
+                    OnPropertyChanged();
+                }
             }
         }
 
@@ -43,8 +47,11 @@ namespace PlayniteGo
             get => Settings.ImageQuality;
             set
             {
-                Settings.ImageQuality = value;
-                OnPropertyChanged();
+                if (settings.ImageQuality != value)
+                {
+                    Settings.ImageQuality = value;
+                    OnPropertyChanged();
+                }
             }
         }
 
@@ -53,8 +60,11 @@ namespace PlayniteGo
             get => Settings.CoverWidth;
             set
             {
-                Settings.CoverWidth = value;
-                OnPropertyChanged();
+                if (settings.CoverWidth != value)
+                {
+                    Settings.CoverWidth = value;
+                    OnPropertyChanged();
+                }
             }
         }
 
@@ -63,8 +73,11 @@ namespace PlayniteGo
             get => Settings.BackgroundWidth;
             set
             {
-                Settings.BackgroundWidth = value;
-                OnPropertyChanged();
+                if (settings.BackgroundWidth != value)
+                {
+                    Settings.BackgroundWidth = value;
+                    OnPropertyChanged();
+                }
             }
         }
 
@@ -73,8 +86,11 @@ namespace PlayniteGo
             get => Settings.DebugMessage;
             set
             {
-                Settings.DebugMessage = value;
-                OnPropertyChanged();
+                if (settings.DebugMessage != value)
+                {
+                    Settings.DebugMessage = value;
+                    OnPropertyChanged();
+                }
             }
         }
 
@@ -140,12 +156,23 @@ namespace PlayniteGo
         {
             errors = new List<string>();
 
-            if (!string.IsNullOrEmpty(Settings.HowLongToBeatFolderPath) && !Directory.Exists(Settings.HowLongToBeatFolderPath))
+            if (Settings.ImageQuality < 1 || Settings.ImageQuality > 100)
             {
-                errors.Add("HowLongToBeat Folder Path is not a valid directory.");
+                errors.Add("Image Quality must be between 1 and 100.");
+            }
+
+            if (Settings.CoverWidth < 0)
+            {
+                errors.Add("Max Cover Image Width cannot be negative.");
+            }
+
+            if (Settings.BackgroundWidth < 0)
+            {
+                errors.Add("Max Background Image Width cannot be negative.");
             }
 
             return errors.Count == 0;
         }
     }
 }
+// END: D:\Visual Studio Projects\PlayniteGo\PlayniteGoSettingsViewModel.cs

@@ -1,3 +1,4 @@
+// START: D:\Visual Studio Projects\PlayniteGo\PlayniteGo.cs 
 using Playnite.SDK;
 using Playnite.SDK.Data;
 using Playnite.SDK.Models;
@@ -9,9 +10,11 @@ using SixLabors.ImageSharp.Processing;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -133,41 +136,63 @@ namespace PlayniteGo
 
     public class GameExport
     {
+        // --- CORE DATA ---
         public Guid Id { get; set; }
         public string Name { get; set; }
-        public List<string> Platforms { get; set; }
         public string Source { get; set; }
         public ulong Playtime { get; set; }
         public string CoverImagePath { get; set; }
         public string BackgroundImagePath { get; set; }
         public string Description { get; set; }
-        public List<string> Genres { get; set; }
-        public List<string> Features { get; set; }
-        public List<string> Developers { get; set; }
-        public List<string> Publishers { get; set; }
         public DateTime? AddedDate { get; set; }
+        public DateTime? LastActivity { get; set; }
         public int? CommunityScore { get; set; }
         public int? CriticScore { get; set; }
         public string CompletionStatus { get; set; }
         public bool Hidden { get; set; }
         public bool IsInstalled { get; set; }
         public bool Favorite { get; set; }
-        public DateTime? LastActivity { get; set; }
-        public int? UserScore { get; set; }
         public string SortingName { get; set; }
+        public DateTime? ReleaseDate { get; set; }
+        public int? UserScore { get; set; }
+        public string Notes { get; set; }
+        public ulong? InstallSize { get; set; }
+        public HltbApi.HltbDataItem HowLongToBeatData { get; set; }
+
+        // --- CORE RELATIONSHIPS (RAW DATA) ---
+        public List<string> Platforms { get; set; }
+        public List<string> Genres { get; set; }
+        public List<string> Features { get; set; }
+        public List<string> Developers { get; set; }
+        public List<string> Publishers { get; set; }
         public List<LinkExport> Links { get; set; }
         public List<string> AgeRatings { get; set; }
         public List<string> Series { get; set; }
         public List<string> Tags { get; set; }
-        public DateTime? ReleaseDate { get; set; }
-        public ulong? InstallSize { get; set; }
-        public HltbApi.HltbDataItem HowLongToBeatData { get; set; }
         public List<string> Categories { get; set; }
         public List<string> Regions { get; set; }
         public List<string> RelatedDeveloperGameIds { get; set; }
         public List<string> RelatedPublisherGameIds { get; set; }
         public List<string> RelatedSeriesGameIds { get; set; }
+
+        // --- NEW: PRE-COMPUTED & PRE-FORMATTED FIELDS FOR THIN CLIENT ---
+        public string PlainTextDescription { get; set; }
+        public int? ReleaseYear { get; set; }
+        public long? HltbMainStoryInSeconds { get; set; }
+        public string DisplayPlatformNames { get; set; }
+        public string DisplayFirstGenre { get; set; }
+        public string DisplayContributors { get; set; }
+        public string DisplayPlaytime { get; set; }
+        public string DisplayHltbMain { get; set; }
+        public string DisplayInstallSize { get; set; }
+        public string DisplayAddedDate { get; set; }
+        public string DisplayLastPlayed { get; set; }
+        public bool HasControllerSupport { get; set; }
+        public bool HasVRSupport { get; set; }
+        public bool HasUltrawideSupport { get; set; }
+        public bool HasHDRSupport { get; set; }
     }
+
 
     public class LinkExport
     {
@@ -253,15 +278,6 @@ namespace PlayniteGo
                 return;
             }
 
-            string confirmationMessage = "Proceed with full export?\n\n";
-            confirmationMessage += $"HowLongToBeat data: {(hltbFound ? "Found" : "Not Found")}\n\n";
-            confirmationMessage += "Click Yes to continue.";
-
-            if (PlayniteApi.Dialogs.ShowMessage(confirmationMessage, "PlayniteGo Export Confirmation", MessageBoxButton.YesNo) != MessageBoxResult.Yes)
-            {
-                return;
-            }
-
             var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
             if (string.IsNullOrEmpty(result)) return;
 
@@ -290,15 +306,6 @@ namespace PlayniteGo
             if (!gamesToUpdate.Any() && !deletedGameIds.Any())
             {
                 PlayniteApi.Dialogs.ShowMessage("No changes to sync since the last export.", "Sync Complete");
-                return;
-            }
-
-            string confirmationMessage = "Proceed with incremental export?\n\n";
-            confirmationMessage += $"HowLongToBeat data: {(hltbFound ? "Found" : "Not Found")}\n\n";
-            confirmationMessage += "Click Yes to continue.";
-
-            if (PlayniteApi.Dialogs.ShowMessage(confirmationMessage, "PlayniteGo Export Confirmation", MessageBoxButton.YesNo) != MessageBoxResult.Yes)
-            {
                 return;
             }
 
@@ -570,39 +577,73 @@ namespace PlayniteGo
             Dictionary<string, List<Guid>> seriesLookup,
             HashSet<Guid> allExportedGameIds)
         {
+            var hltbData = GetHltbData(game, hltbPath);
+
             var gameExport = new GameExport
             {
+                // --- CORE DATA ---
                 Id = game.Id,
                 Name = game.Name,
-                Platforms = game.Platforms?.Select(p => p.Name).ToList() ?? new List<string>(),
                 Source = game.Source?.Name,
                 Playtime = game.Playtime,
                 Description = game.Description,
-                Genres = game.Genres?.Select(g => g.Name).ToList() ?? new List<string>(),
-                Features = game.Features?.Select(f => f.Name).ToList() ?? new List<string>(),
-                Developers = game.Developers?.Select(d => d.Name).ToList() ?? new List<string>(),
-                Publishers = game.Publishers?.Select(p => p.Name).ToList() ?? new List<string>(),
                 AddedDate = game.Added,
+                LastActivity = game.LastActivity,
                 CommunityScore = game.CommunityScore,
                 CriticScore = game.CriticScore,
                 CompletionStatus = game.CompletionStatus?.Name,
                 Hidden = game.Hidden,
                 IsInstalled = game.IsInstalled,
                 Favorite = game.Favorite,
-                LastActivity = game.LastActivity,
-                UserScore = game.UserScore,
                 SortingName = game.SortingName,
+                ReleaseDate = game.ReleaseDate?.Date,
+                UserScore = game.UserScore,
+                Notes = game.Notes,
+                InstallSize = game.InstallSize,
+                HowLongToBeatData = hltbData,
+
+                // --- CORE RELATIONSHIPS (RAW DATA) ---
+                Platforms = game.Platforms?.Select(p => p.Name).ToList() ?? new List<string>(),
+                Genres = game.Genres?.Select(g => g.Name).ToList() ?? new List<string>(),
+                Features = game.Features?.Select(f => f.Name).ToList() ?? new List<string>(),
+                Developers = game.Developers?.Select(d => d.Name).ToList() ?? new List<string>(),
+                Publishers = game.Publishers?.Select(p => p.Name).ToList() ?? new List<string>(),
                 Links = game.Links?.Select(l => new LinkExport { Name = l.Name, Url = l.Url }).ToList() ?? new List<LinkExport>(),
                 AgeRatings = game.AgeRatings?.Select(ar => ar.Name).ToList() ?? new List<string>(),
                 Series = game.Series?.Select(s => s.Name).ToList() ?? new List<string>(),
                 Tags = game.Tags?.Select(t => t.Name).ToList() ?? new List<string>(),
-                ReleaseDate = game.ReleaseDate?.Date,
-                InstallSize = game.InstallSize,
+                Categories = game.Categories?.Select(c => c.Name).ToList() ?? new List<string>(),
+                Regions = game.Regions?.Select(r => r.Name).ToList() ?? new List<string>(),
+
+                // --- IMAGE PROCESSING ---
                 CoverImagePath = ProcessAndCopyLocalImage(game.CoverImage, imagesDir, ImageType.Cover),
                 BackgroundImagePath = ProcessAndCopyLocalImage(game.BackgroundImage, imagesDir, ImageType.Background),
-                Categories = game.Categories?.Select(c => c.Name).ToList() ?? new List<string>(),
-                Regions = game.Regions?.Select(r => r.Name).ToList() ?? new List<string>()
             };
+
+            // --- PRE-COMPUTATION LOGIC ---
+            gameExport.PlainTextDescription = StripHtml(game.Description);
+            gameExport.ReleaseYear = game.ReleaseDate?.Year;
+            gameExport.HltbMainStoryInSeconds = (long?)(hltbData?.TimeData?.MainStoryAverage);
+
+            gameExport.DisplayPlatformNames = FormatPlatformNames(game.Platforms);
+            gameExport.DisplayFirstGenre = FormatFirstGenre(game.Genres?.FirstOrDefault()?.Name);
+            gameExport.DisplayContributors = FormatContributors(game.Developers, game.Publishers);
+            gameExport.DisplayPlaytime = FormatPlaytime(game.Playtime);
+            gameExport.DisplayHltbMain = FormatHltbMain(hltbData?.TimeData?.MainStoryAverage);
+            gameExport.DisplayInstallSize = FormatInstallSize(game.InstallSize);
+            gameExport.DisplayAddedDate = FormatShortDate(game.Added);
+            gameExport.DisplayLastPlayed = FormatShortDate(game.LastActivity);
+
+            var allFeatures = new HashSet<string>(
+                (game.Features?.Select(f => f.Name.ToLowerInvariant()) ?? Enumerable.Empty<string>())
+                .Concat(game.Tags?.Select(t => t.Name.ToLowerInvariant()) ?? Enumerable.Empty<string>())
+            );
+
+            gameExport.HasControllerSupport = allFeatures.Any(f => f.Contains("controller"));
+            gameExport.HasVRSupport = allFeatures.Any(f => f == "vr" || f == "virtual reality" || f == "virtual-reality");
+            gameExport.HasUltrawideSupport = allFeatures.Any(f => f.Contains("ultrawide") || f.Contains("ultra-wide"));
+            gameExport.HasHDRSupport = allFeatures.Any(f => f.Contains("hdr"));
+
 
             var relatedDeveloperIds = new HashSet<Guid>();
             if (game.Developers != null)
@@ -661,44 +702,44 @@ namespace PlayniteGo
             }
             gameExport.RelatedSeriesGameIds = relatedSeriesIds.Select(id => id.ToString()).ToList();
 
-            if (!string.IsNullOrEmpty(hltbPath))
-            {
-                string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
-                if (File.Exists(hltbDetailsPath))
-                {
-                    try
-                    {
-                        var hltbData = Serialization.FromJson<HltbApi.HltbData>(File.ReadAllText(hltbDetailsPath));
-                        gameExport.HowLongToBeatData = hltbData?.Items?.FirstOrDefault();
-                    }
-                    catch (Exception ex) { logger.Error(ex, $"Failed to parse HLTB data for game {game.Name} ({game.Id})."); }
-                }
-            }
-
             return gameExport;
+        }
+
+        // --- HELPER METHODS RE-ADDED ---
+
+        private HltbApi.HltbDataItem GetHltbData(Game game, string hltbPath)
+        {
+            if (game == null || string.IsNullOrEmpty(hltbPath)) return null;
+            string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
+            if (!File.Exists(hltbDetailsPath)) return null;
+            try
+            {
+                var hltbData = Serialization.FromJson<HltbApi.HltbData>(File.ReadAllText(hltbDetailsPath));
+                return hltbData?.Items?.FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, $"Failed to parse HLTB data for game {game.Name} ({game.Id}).");
+                return null;
+            }
         }
 
         private bool CheckPrerequisites(out string hltbPath, out bool hltbFound)
         {
-            hltbPath = GetEffectivePath(settings.Settings.HowLongToBeatFolderPath, hltbPluginId);
+            hltbPath = GetEffectivePath(hltbPluginId);
             hltbFound = !string.IsNullOrEmpty(hltbPath);
 
             if (!hltbFound)
             {
-                PlayniteApi.Dialogs.ShowMessage("Could not determine the path for the HowLongToBeat plugin data. Please configure it in the settings.", "PlayniteGo");
+                PlayniteApi.Dialogs.ShowMessage("Could not determine the path for the HowLongToBeat plugin data. Please ensure the plugin is installed.", "PlayniteGo");
                 return false;
             }
 
             return true;
         }
 
-        private string GetEffectivePath(string manualPath, Guid pluginId)
+        private string GetEffectivePath(Guid pluginId)
         {
-            if (!string.IsNullOrEmpty(manualPath) && Directory.Exists(manualPath))
-            {
-                return manualPath;
-            }
-
             var plugin = PlayniteApi.Addons.Plugins.FirstOrDefault(p => p.Id == pluginId);
             if (plugin == null) return null;
             return plugin.GetPluginUserDataPath();
@@ -867,6 +908,80 @@ namespace PlayniteGo
             }
         }
 
+        // --- PRE-COMPUTATION HELPER METHODS ---
+
+        private static string StripHtml(string html)
+        {
+            if (string.IsNullOrEmpty(html)) return null;
+            return Regex.Replace(html, "<.*?>", string.Empty).Trim();
+        }
+
+        private static string FormatPlatformNames(IEnumerable<Platform> platforms)
+        {
+            if (platforms == null || !platforms.Any()) return null;
+            return string.Join(", ", platforms.Select(p => {
+                switch (p.Name.ToLowerInvariant())
+                {
+                    case "pc (windows)": return "PC";
+                    case "macintosh": return "Mac";
+                    case "pc (linux)": return "Linux";
+                    default: return p.Name;
+                }
+            }));
+        }
+
+        private static string FormatFirstGenre(string genre)
+        {
+            if (string.IsNullOrEmpty(genre)) return null;
+            switch (genre)
+            {
+                case "Real Time Strategy": return "RTS";
+                case "Hack and Slash/Beat 'em up": return "Hack and Slash";
+                case "Massively Multiplayer": return "MMO";
+                default: return genre;
+            }
+        }
+
+        private static string FormatContributors(IEnumerable<Company> developers, IEnumerable<Company> publishers)
+        {
+            var devNames = developers?.Select(d => d.Name).ToList() ?? new List<string>();
+            var pubNames = publishers?.Select(p => p.Name).ToList() ?? new List<string>();
+            var contributors = new List<string>();
+            if (devNames.Any()) contributors.Add(string.Join(", ", devNames));
+            if (pubNames.Any()) contributors.Add(string.Join(", ", pubNames));
+            return string.Join(" • ", contributors);
+        }
+
+        private static string FormatPlaytime(ulong playtimeInSeconds)
+        {
+            if (playtimeInSeconds <= 0) return null;
+            return $"{playtimeInSeconds / 3600}h";
+        }
+
+        private static string FormatHltbMain(ulong? hltbMainInSeconds)
+        {
+            if (hltbMainInSeconds == null || hltbMainInSeconds <= 0) return null;
+            return $"{hltbMainInSeconds / 3600}h";
+        }
+
+        private static string FormatInstallSize(ulong? installSizeInBytes)
+        {
+            if (installSizeInBytes == null || installSizeInBytes <= 0) return null;
+            const long gb = 1073741824;
+            const long mb = 1048576;
+            if (installSizeInBytes >= gb)
+            {
+                return string.Format("{0:0.##} GB", (double)installSizeInBytes / gb);
+            }
+            return string.Format("{0:0} MB", (double)installSizeInBytes / mb);
+        }
+
+        private static string FormatShortDate(DateTime? date)
+        {
+            return date?.ToString("d", CultureInfo.CurrentCulture);
+        }
+
+
         public override ISettings GetSettings(bool firstRunSettings) => settings;
 
         public override UserControl GetSettingsView(bool firstRunSettings)
@@ -875,3 +990,4 @@ namespace PlayniteGo
         }
     }
 }
+// END: D:\Visual Studio Projects\PlayniteGo\PlayniteGo.cs
