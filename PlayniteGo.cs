@@ -1,4 +1,3 @@
-// START: D:\Visual Studio Projects\PlayniteGo\PlayniteGo.cs 
 using Playnite.SDK;
 using Playnite.SDK.Data;
 using Playnite.SDK.Models;
@@ -14,6 +13,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -250,7 +250,7 @@ namespace PlayniteGo
 
         public override IEnumerable<MainMenuItem> GetMainMenuItems(GetMainMenuItemsArgs args)
         {
-            return new List<MainMenuItem>
+            var menuItems = new List<MainMenuItem>
             {
                 new MainMenuItem
                 {
@@ -263,56 +263,104 @@ namespace PlayniteGo
                     Description = "Sync Changes to App",
                     MenuSection = "@PlayniteGo",
                     Action = (actionArgs) => PerformIncrementalExport()
+                },
+                new MainMenuItem
+                {
+                    Description = "-", // Separator
+                    MenuSection = "@PlayniteGo"
+                },
+                new MainMenuItem
+                {
+                    Description = "Copy Diagnostic Report to Clipboard",
+                    MenuSection = "@PlayniteGo|Help & Support",
+                    Action = (actionArgs) =>
+                    {
+                        var report = GenerateDiagnosticReport();
+                        Clipboard.SetText(report);
+                        PlayniteApi.Dialogs.ShowMessage("Diagnostic data has been copied to your clipboard.", "PlayniteGo");
+                    }
+                },
+                new MainMenuItem
+                {
+                    Description = "Save Diagnostic Report to File...",
+                    MenuSection = "@PlayniteGo|Help & Support",
+                    Action = (actionArgs) =>
+                    {
+                        var report = GenerateDiagnosticReport();
+                        var result = PlayniteApi.Dialogs.SaveFile("Text Files (*.txt)|*.txt");
+                        if (!string.IsNullOrEmpty(result))
+                        {
+                            File.WriteAllText(result, report);
+                        }
+                    }
                 }
             };
+
+            return menuItems;
         }
 
         private void PerformFullExport()
         {
-            if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
-
-            var allGames = PlayniteApi.Database.Games.ToList();
-            if (!allGames.Any())
+            try
             {
-                PlayniteApi.Dialogs.ShowMessage("No games in library to export.", "PlayniteGo Export");
-                return;
+                if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
+
+                var allGames = PlayniteApi.Database.Games.ToList();
+                if (!allGames.Any())
+                {
+                    PlayniteApi.Dialogs.ShowMessage("No games in library to export.", "PlayniteGo Export");
+                    return;
+                }
+
+                var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
+                if (string.IsNullOrEmpty(result)) return;
+
+                ExecuteFullExport(allGames, result, hltbPath, "Full library export...");
             }
-
-            var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
-            if (string.IsNullOrEmpty(result)) return;
-
-            ExecuteFullExport(allGames, result, hltbPath, "Full library export...");
+            catch (Exception ex)
+            {
+                logger.Error(ex, "Failed to perform full export.");
+                PlayniteApi.Dialogs.ShowErrorMessage("An unexpected error occurred during the full export. Please check the log file for details.", "PlayniteGo Error");
+            }
         }
 
         private void PerformIncrementalExport()
         {
-            if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
-
-            var lastExportDate = LoadLastExportDate();
-            if (lastExportDate == DateTime.MinValue)
+            try
             {
-                PlayniteApi.Dialogs.ShowMessage("A full export has not been performed yet. Please run 'Full Export to App' first to create a baseline.", "Sync Error");
-                return;
+                if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
+
+                var lastExportDate = LoadLastExportDate();
+                if (lastExportDate == DateTime.MinValue)
+                {
+                    PlayniteApi.Dialogs.ShowMessage("A full export has not been performed yet. Please run 'Full Export to App' first to create a baseline.", "Sync Error");
+                    return;
+                }
+
+                var modifiedGames = PlayniteApi.Database.Games.Where(g => g.Modified != null && g.Modified > lastExportDate).ToList();
+                var newGames = PlayniteApi.Database.Games.Where(g => g.Added != null && g.Added > lastExportDate).ToList();
+                var gamesToUpdate = newGames.Union(modifiedGames).Distinct().ToList();
+
+                var previousIds = LoadPreviouslyExportedIds();
+                var currentIds = Enumerable.ToHashSet(PlayniteApi.Database.Games.Select(g => g.Id));
+                var deletedGameIds = previousIds.Where(id => !currentIds.Contains(id)).ToList();
+
+                if (!gamesToUpdate.Any() && !deletedGameIds.Any())
+                {
+                    PlayniteApi.Dialogs.ShowMessage("No changes to sync since the last export.", "Sync Complete");
+                    return;
+                }
+
+                var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
+                if (string.IsNullOrEmpty(result)) return;
+
+                ExecuteIncrementalExport(gamesToUpdate, deletedGameIds, result, hltbPath, "Syncing library changes...");
             }
-
-            var modifiedGames = PlayniteApi.Database.Games.Where(g => g.Modified != null && g.Modified > lastExportDate).ToList();
-            var newGames = PlayniteApi.Database.Games.Where(g => g.Added != null && g.Added > lastExportDate).ToList();
-            var gamesToUpdate = newGames.Union(modifiedGames).Distinct().ToList();
-
-            var previousIds = LoadPreviouslyExportedIds();
-            var currentIds = Enumerable.ToHashSet(PlayniteApi.Database.Games.Select(g => g.Id));
-            var deletedGameIds = previousIds.Where(id => !currentIds.Contains(id)).ToList();
-
-            if (!gamesToUpdate.Any() && !deletedGameIds.Any())
+            catch (Exception ex)
             {
-                PlayniteApi.Dialogs.ShowMessage("No changes to sync since the last export.", "Sync Complete");
-                return;
+                logger.Error(ex, "Failed to perform incremental export.");
+                PlayniteApi.Dialogs.ShowErrorMessage("An unexpected error occurred during the sync. Please check the log file for details.", "PlayniteGo Error");
             }
-
-            var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
-            if (string.IsNullOrEmpty(result)) return;
-
-            ExecuteIncrementalExport(gamesToUpdate, deletedGameIds, result, hltbPath, "Syncing library changes...");
         }
 
         private void ExecuteFullExport(List<Game> gamesToProcess, string exportZipPath, string hltbPath, string progressMessage)
@@ -981,6 +1029,130 @@ namespace PlayniteGo
             return date?.ToString("d", CultureInfo.CurrentCulture);
         }
 
+        private string GenerateDiagnosticReport()
+        {
+            var sb = new StringBuilder();
+            var logPath = Path.Combine(PlayniteApi.Paths.ConfigurationPath, "playnite.log");
+            var settingsPath = GetPluginUserDataPath();
+            var configPath = PlayniteApi.Paths.ConfigurationPath;
+
+            sb.AppendLine("--- PlayniteGo Diagnostic Report ---");
+            sb.AppendLine($"Report Generated: {DateTime.Now}");
+            sb.AppendLine();
+
+            // --- System & Version Info ---
+            sb.AppendLine("## System & Version Info ##");
+            try
+            {
+                sb.AppendLine($"- PlayniteGo Version: {System.Reflection.Assembly.GetExecutingAssembly().GetName().Version}");
+                sb.AppendLine($"- Playnite Version: {PlayniteApi.ApplicationInfo.ApplicationVersion}");
+                sb.AppendLine($"- OS Version: {Environment.OSVersion.VersionString}");
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("Error getting version info: " + ex.Message);
+            }
+            sb.AppendLine();
+
+            // --- Plugin Settings ---
+            sb.AppendLine("## PlayniteGo Settings ##");
+            try
+            {
+                var settingsJson = Serialization.ToJson(settings.Settings, true);
+                sb.AppendLine(settingsJson);
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("Error getting plugin settings: " + ex.Message);
+            }
+            sb.AppendLine();
+
+            // --- Installed Plugins ---
+            sb.AppendLine("## Installed Plugins ##");
+            try
+            {
+                sb.AppendLine("## Installed Plugins ##");
+                
+                // --- Enabled Plugins ---
+                // The API in this environment appears to have non-standard types.
+                // We will print the information we can reliably get.
+                sb.AppendLine("\n### Enabled Plugins ###");
+                foreach (var plugin in PlayniteApi.Addons.Plugins)
+                {
+                    sb.AppendLine($"- Type: {plugin.GetType().FullName}, ID: {plugin.Id}");
+                }
+
+                // --- Disabled Plugins ---
+                if (PlayniteApi.Addons.DisabledAddons is System.Collections.Generic.IEnumerable<string> disabledAddonIds && disabledAddonIds.Any())
+                {
+                    sb.AppendLine("\n### Disabled Plugins ###");
+                    foreach (var idString in disabledAddonIds)
+                    {
+                        sb.AppendLine($"- ID: {idString} (DISABLED)");
+                    }
+                }
+
+                // --- All Addons (as reported by API) ---
+                 if (PlayniteApi.Addons.Addons is System.Collections.Generic.IEnumerable<string> allAddonIds && allAddonIds.Any())
+                {
+                    sb.AppendLine("\n### All Addon IDs ###");
+                    foreach (var idString in allAddonIds)
+                    {
+                        sb.AppendLine($"- ID: {idString}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("Error getting installed plugins: " + ex.Message);
+            }
+            sb.AppendLine();
+
+            // --- Playnite Config ---
+            sb.AppendLine("## Playnite Config ##");
+            try
+            {
+                var configFilePath = Path.Combine(configPath, "config.json");
+                if (File.Exists(configFilePath))
+                {
+                    sb.AppendLine(File.ReadAllText(configFilePath));
+                }
+                else
+                {
+                    sb.AppendLine("config.json not found.");
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("Error reading Playnite config: " + ex.Message);
+            }
+            sb.AppendLine();
+
+            // --- Recent Log Entries ---
+            sb.AppendLine("--- Recent Playnite Log Entries ---");
+            try
+            {
+                if (File.Exists(logPath))
+                {
+                    var lastLines = File.ReadLines(logPath).Reverse().Take(200).Reverse();
+                    foreach (var line in lastLines)
+                    {
+                        sb.AppendLine(line);
+                    }
+                }
+                else
+                {
+                    sb.AppendLine("playnite.log file not found.");
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"Error reading log file: {ex.Message}");
+            }
+
+            return sb.ToString();
+        }
+
 
         public override ISettings GetSettings(bool firstRunSettings) => settings;
 
@@ -990,4 +1162,3 @@ namespace PlayniteGo
         }
     }
 }
-// END: D:\Visual Studio Projects\PlayniteGo\PlayniteGo.cs
