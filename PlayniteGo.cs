@@ -13,6 +13,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -961,7 +962,27 @@ namespace PlayniteGo
         private static string StripHtml(string html)
         {
             if (string.IsNullOrEmpty(html)) return null;
-            return Regex.Replace(html, "<.*?>", string.Empty).Trim();
+
+            string text = html;
+
+            // 1. Replace <br> tags with newlines
+            text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
+
+            // 2. Replace closing block tags with newlines to create paragraph breaks
+            text = Regex.Replace(text, @"</(p|div|h[1-6]|li)>", "\n", RegexOptions.IgnoreCase);
+
+            // 3. Strip all other HTML tags (including opening block tags now)
+            text = Regex.Replace(text, @"<[^>]+>", string.Empty);
+
+            // 4. Decode HTML entities
+            text = WebUtility.HtmlDecode(text);
+
+            // 5. Clean up whitespace and newlines
+            // Replace multiple newlines with a single newline
+            text = Regex.Replace(text, @"(\s*\n\s*)+", "\n");
+            text = text.Trim();
+
+            return text;
         }
 
         private static string FormatPlatformNames(IEnumerable<Platform> platforms)
@@ -1072,7 +1093,7 @@ namespace PlayniteGo
             try
             {
                 sb.AppendLine("## Installed Plugins ##");
-                
+
                 // --- Enabled Plugins ---
                 // The API in this environment appears to have non-standard types.
                 // We will print the information we can reliably get.
@@ -1093,7 +1114,7 @@ namespace PlayniteGo
                 }
 
                 // --- All Addons (as reported by API) ---
-                 if (PlayniteApi.Addons.Addons is System.Collections.Generic.IEnumerable<string> allAddonIds && allAddonIds.Any())
+                if (PlayniteApi.Addons.Addons is System.Collections.Generic.IEnumerable<string> allAddonIds && allAddonIds.Any())
                 {
                     sb.AppendLine("\n### All Addon IDs ###");
                     foreach (var idString in allAddonIds)
