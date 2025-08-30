@@ -154,7 +154,7 @@ namespace PlayniteGo
         public bool IsInstalled { get; set; }
         public bool Favorite { get; set; }
         public string SortingName { get; set; }
-        public DateTime? ReleaseDate { get; set; }
+        public ReleaseDate? ReleaseDate { get; set; }
         public int? UserScore { get; set; }
         public string Notes { get; set; }
         public ulong? InstallSize { get; set; }
@@ -233,6 +233,14 @@ namespace PlayniteGo
             public DateTime LastExportDate { get; set; }
         }
 
+        public class ImageCacheSettings
+        {
+            public string ImageExportFormat { get; set; }
+            public int CoverWidth { get; set; }
+            public int BackgroundWidth { get; set; }
+            public int ImageQuality { get; set; }
+        }
+
         private static readonly ILogger logger = LogManager.GetLogger();
         private PlayniteGoSettingsViewModel settings { get; set; }
         public override Guid Id { get; } = Guid.Parse("af7bd5e5-0ae0-4276-bb2a-cdf7fadea92e");
@@ -242,6 +250,22 @@ namespace PlayniteGo
 
         public static Guid steamPluginId = Guid.Parse("cb91dfc9-b977-43bf-8e70-55f46e410fab");
         public static Guid hltbPluginId = Guid.Parse("e08cd51f-9c9a-4ee3-a094-fde03b55492f");
+
+        private const double SecondsInHour = 3600.0;
+        private const double BytesInGigabyte = 1073741824.0;
+        private const double BytesInMegabyte = 1048576.0;
+
+        private static readonly string[] ControllerKeywords = { "controller" };
+        private static readonly string[] VrKeywords = { "vr", "virtual reality", "virtual-reality" };
+        private static readonly string[] UltrawideKeywords = { "ultrawide", "ultra-wide" };
+        private static readonly string[] HdrKeywords = { "hdr" };
+
+        private static bool CheckSupport(Game g, string[] keywords)
+        {
+            if (g.Features?.Any(f => keywords.Any(k => f.Name.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0)) == true) return true;
+            if (g.Tags?.Any(t => keywords.Any(k => t.Name.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0)) == true) return true;
+            return false;
+        }
 
         public PlayniteGo(IPlayniteAPI api) : base(api)
         {
@@ -397,186 +421,193 @@ namespace PlayniteGo
         private bool ProcessAndZip(List<Game> gamesToProcess, ExportPayload payload, string exportZipPath, HashSet<Guid> currentIds, string hltbPath, string progressMessage, DateTime exportDate)
         {
             bool wasSuccess = false;
-            PlayniteApi.Dialogs.ActivateGlobalProgress(args =>
+            var tempDir = Path.Combine(Path.GetTempPath(), "PlayniteExport_" + Guid.NewGuid());
+            var imagesDir = Path.Combine(tempDir, "images");
+
+            try
             {
-                var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
-
-                Func<Game, HltbApi.HltbDataItem> getHltbData = (game) =>
-                {
-                    if (game == null || string.IsNullOrEmpty(hltbPath)) return null;
-                    string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
-                    if (!File.Exists(hltbDetailsPath)) return null;
-                    try
-                    {
-                        var hltbData = Serialization.FromJson<HltbApi.HltbData>(File.ReadAllText(hltbDetailsPath));
-                        return hltbData?.Items?.FirstOrDefault();
-                    }
-                    catch { return null; }
-                };
-
-                // ✅ --- START OF OPTIMIZED DATA AGGREGATION ---
-
-                args.Text = "Analyzing library...";
-                args.IsIndeterminate = true;
-
-                var playedGames = new List<Game>();
-                var unplayedGames = new List<Game>();
-
-                var uniqueSources = new HashSet<string>();
-                var uniqueCompletionStatuses = new HashSet<string>();
-                var uniquePlatforms = new HashSet<string>();
-                var uniqueGenres = new HashSet<string>();
-                var uniqueDevelopers = new HashSet<string>();
-                var uniquePublishers = new HashSet<string>();
-                var uniqueFeatures = new HashSet<string>();
-                var uniqueTags = new HashSet<string>();
-                var uniqueSeries = new HashSet<string>();
-                var uniqueAgeRatings = new HashSet<string>();
-                var uniqueRegions = new HashSet<string>();
-                var uniqueCategories = new HashSet<string>();
-
-                var developerLookup = new Dictionary<string, List<Guid>>();
-                var publisherLookup = new Dictionary<string, List<Guid>>();
-                var seriesLookup = new Dictionary<string, List<Guid>>();
-
-                // ✅ This single loop gathers all data needed for filters, stats, and lookups.
-                foreach (var game in allGamesInLibrary)
-                {
-                    // Stats categorization
-                    if (game.Playtime > 0) { playedGames.Add(game); } else { unplayedGames.Add(game); }
-
-                    // Filter options
-                    if (game.Source != null) uniqueSources.Add(game.Source.Name);
-                    if (game.CompletionStatus != null) uniqueCompletionStatuses.Add(game.CompletionStatus.Name);
-                    if (game.Platforms != null) foreach (var p in game.Platforms) uniquePlatforms.Add(p.Name);
-                    if (game.Genres != null) foreach (var g in game.Genres) uniqueGenres.Add(g.Name);
-                    if (game.Developers != null) foreach (var d in game.Developers) uniqueDevelopers.Add(d.Name);
-                    if (game.Publishers != null) foreach (var p in game.Publishers) uniquePublishers.Add(p.Name);
-                    if (game.Features != null) foreach (var f in game.Features) uniqueFeatures.Add(f.Name);
-                    if (game.Tags != null) foreach (var t in game.Tags) uniqueTags.Add(t.Name);
-                    if (game.Series != null) foreach (var s in game.Series) uniqueSeries.Add(s.Name);
-                    if (game.AgeRatings != null) foreach (var a in game.AgeRatings) uniqueAgeRatings.Add(a.Name);
-                    if (game.Regions != null) foreach (var r in game.Regions) uniqueRegions.Add(r.Name);
-                    if (game.Categories != null) foreach (var c in game.Categories) uniqueCategories.Add(c.Name);
-
-                    // Lookup tables for related games
-                    if (game.Developers != null) foreach (var dev in game.Developers) { if (!developerLookup.ContainsKey(dev.Name)) developerLookup[dev.Name] = new List<Guid>(); developerLookup[dev.Name].Add(game.Id); }
-                    if (game.Publishers != null) foreach (var pub in game.Publishers) { if (!publisherLookup.ContainsKey(pub.Name)) publisherLookup[pub.Name] = new List<Guid>(); publisherLookup[pub.Name].Add(game.Id); }
-                    if (game.Series != null) foreach (var ser in game.Series) { if (!seriesLookup.ContainsKey(ser.Name)) seriesLookup[ser.Name] = new List<Guid>(); seriesLookup[ser.Name].Add(game.Id); }
-                }
-
-                var filterOptions = new ExportedFilterOptions
-                {
-                    Sources = uniqueSources.OrderBy(n => n).ToList(),
-                    CompletionStatuses = uniqueCompletionStatuses.OrderBy(n => n).ToList(),
-                    Platforms = uniquePlatforms.OrderBy(n => n).ToList(),
-                    Genres = uniqueGenres.OrderBy(n => n).ToList(),
-                    Developers = uniqueDevelopers.OrderBy(n => n).ToList(),
-                    Publishers = uniquePublishers.OrderBy(n => n).ToList(),
-                    Features = uniqueFeatures.OrderBy(n => n).ToList(),
-                    Tags = uniqueTags.OrderBy(n => n).ToList(),
-                    Series = uniqueSeries.OrderBy(n => n).ToList(),
-                    AgeRatings = uniqueAgeRatings.OrderBy(n => n).ToList(),
-                    Regions = uniqueRegions.OrderBy(n => n).ToList(),
-                    Categories = uniqueCategories.OrderBy(n => n).ToList()
-                };
-
-                var gamesWithReleaseYear = allGamesInLibrary.Where(g => g.ReleaseDate != null).Select(g => g.ReleaseDate.Value.Year).ToList();
-                var gamesWithHltb = allGamesInLibrary.Select(g => getHltbData(g)?.TimeData?.MainStoryAverage ?? 0).Where(t => t > 0).ToList();
-
-                int maxPlaytimeHours = allGamesInLibrary.Any() ? (int)Math.Ceiling(allGamesInLibrary.Max(g => g.Playtime) / 3600.0) : 1;
-                int minReleaseYear = gamesWithReleaseYear.Any() ? gamesWithReleaseYear.Min() : 1990;
-                int maxReleaseYear = gamesWithReleaseYear.Any() ? gamesWithReleaseYear.Max() : DateTime.Now.Year;
-                int maxInstallSizeGb = allGamesInLibrary.Any(g => g.InstallSize > 0) ? (int)Math.Ceiling(allGamesInLibrary.Max(g => g.InstallSize ?? 0) / 1073741824.0) : 1;
-                int maxHltbHours = gamesWithHltb.Any() ? (int)Math.Ceiling(gamesWithHltb.Max() / 3600.0) : 1;
-
-                filterOptions.PlaytimeRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxPlaytimeHours) };
-                filterOptions.ReleaseYearRange = new RangeData { LowerBound = minReleaseYear, UpperBound = maxReleaseYear };
-                filterOptions.InstallSizeRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxInstallSizeGb) };
-                filterOptions.HltbMainStoryRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxHltbHours) };
-
-                Func<List<Game>, SummaryStats> calculateSummaryStats = (games) =>
-                {
-                    if (!games.Any()) return new SummaryStats { TotalGames = 0, CompletionStatusCounts = new List<CountData>(), AllPlatforms = new List<CountData>() };
-
-                    var playedGamesStats = games.Where(g => g.Playtime > 0).ToList();
-                    var gamesWithReleaseDate = games.Where(g => g.ReleaseDate != null).ToList();
-                    var gamesWithAddedDate = games.Where(g => g.Added != null).ToList();
-
-                    var mostPlayed = playedGamesStats.OrderByDescending(g => g.Playtime).FirstOrDefault();
-                    var leastPlayed = playedGamesStats.OrderBy(g => g.Playtime).FirstOrDefault();
-                    var oldestRelease = gamesWithReleaseDate.OrderBy(g => g.ReleaseDate.Value).FirstOrDefault();
-                    var newestRelease = gamesWithReleaseDate.OrderByDescending(g => g.ReleaseDate.Value).FirstOrDefault();
-                    var oldestAdded = gamesWithAddedDate.OrderBy(g => g.Added.Value).FirstOrDefault();
-                    var newestAdded = gamesWithAddedDate.OrderByDescending(g => g.Added.Value).FirstOrDefault();
-
-                    return new SummaryStats
-                    {
-                        TotalGames = games.Count,
-                        GamesPlayedCount = playedGamesStats.Count,
-                        TotalPlaytimeHours = (int)games.Sum(g => (long)g.Playtime) / 3600,
-                        MostPlayedGame = mostPlayed == null ? null : new GameTime { Name = mostPlayed.Name, Hours = (int)(mostPlayed.Playtime / 3600) },
-                        LeastPlayedGame = leastPlayed == null ? null : new GameTime { Name = leastPlayed.Name, Hours = (int)(leastPlayed.Playtime / 3600) },
-                        CompletionStatusCounts = games.GroupBy(g => g.CompletionStatus?.Name ?? "Not Set").Select(g => new CountData { Name = g.Key, Count = g.Count() }).OrderByDescending(s => s.Count).ToList(),
-                        AllSources = games.Where(g => g.Source != null).GroupBy(g => g.Source.Name).Select(g => new CountData { Name = g.Key, Count = g.Count() }).OrderByDescending(s => s.Count).ToList(),
-                        AllPlatforms = games.Where(g => g.Platforms != null).SelectMany(g => g.Platforms).GroupBy(p => p.Name).Select(group => new CountData { Name = group.Key, Count = group.Count() }).OrderByDescending(x => x.Count).ToList(),
-                        TopGenres = games.Where(g => g.Genres != null).SelectMany(g => g.Genres).GroupBy(g => g.Name).Select(group => new CountData { Name = group.Key, Count = group.Count() }).OrderByDescending(x => x.Count).Take(5).ToList(),
-                        TopDevelopers = games.Where(g => g.Developers != null).SelectMany(g => g.Developers).GroupBy(g => g.Name).Select(group => new CountData { Name = group.Key, Count = group.Count() }).OrderByDescending(x => x.Count).Take(5).ToList(),
-                        TopPublishers = games.Where(g => g.Publishers != null).SelectMany(g => g.Publishers).GroupBy(g => g.Name).Select(group => new CountData { Name = group.Key, Count = group.Count() }).OrderByDescending(x => x.Count).Take(5).ToList(),
-                        TopTags = games.Where(g => g.Tags != null).SelectMany(g => g.Tags).GroupBy(g => g.Name).Select(group => new CountData { Name = group.Key, Count = group.Count() }).OrderByDescending(x => x.Count).Take(5).ToList(),
-                        TopFeatures = games.Where(g => g.Features != null).SelectMany(g => g.Features).GroupBy(g => g.Name).Select(group => new CountData { Name = group.Key, Count = group.Count() }).OrderByDescending(x => x.Count).Take(5).ToList(),
-                        GamesByDecade = games.Where(g => g.ReleaseDate != null).GroupBy(g => (g.ReleaseDate.Value.Year / 10) * 10).Select(g => new CountData { Name = $"{g.Key}s", Count = g.Count() }).OrderBy(x => x.Name).ToList(),
-                        TopCriticRated = games.Where(g => g.CriticScore != null && g.CriticScore > 0).OrderByDescending(g => g.CriticScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CriticScore.Value }).ToList(),
-                        BottomCriticRated = games.Where(g => g.CriticScore != null && g.CriticScore > 0).OrderBy(g => g.CriticScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CriticScore.Value }).ToList(),
-                        TopCommunityRated = games.Where(g => g.CommunityScore != null && g.CommunityScore > 0).OrderByDescending(g => g.CommunityScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CommunityScore.Value }).ToList(),
-                        BottomCommunityRated = games.Where(g => g.CommunityScore != null && g.CommunityScore > 0).OrderBy(g => g.CommunityScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CommunityScore.Value }).ToList(),
-                        TopUserRated = games.Where(g => g.UserScore != null && g.UserScore > 0).OrderByDescending(g => g.UserScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.UserScore.Value }).ToList(),
-                        BottomUserRated = games.Where(g => g.UserScore != null && g.UserScore > 0).OrderBy(g => g.UserScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.UserScore.Value }).ToList(),
-                        OldestRelease = oldestRelease == null ? null : new GameScore { Name = oldestRelease.Name, Score = oldestRelease.ReleaseDate.Value.Year },
-                        NewestRelease = newestRelease == null ? null : new GameScore { Name = newestRelease.Name, Score = newestRelease.ReleaseDate.Value.Year },
-                        OldestAdded = oldestAdded == null ? null : new GameScore { Name = oldestAdded.Name, Score = oldestAdded.Added.Value.Year },
-                        NewestAdded = newestAdded == null ? null : new GameScore { Name = newestAdded.Name, Score = newestAdded.Added.Value.Year }
-                    };
-                };
-
-                var backlogGames = unplayedGames.Select(g => new { Game = g, Hltb = getHltbData(g) }).Where(x => x.Hltb?.TimeData?.MainStoryAverage > 0).ToList();
-                var longestBacklogGame = backlogGames.OrderByDescending(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
-                var shortestBacklogGame = backlogGames.Where(g => g.Hltb.TimeData.MainStoryAverage > 0).OrderBy(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
-                long totalBacklogSeconds = backlogGames.Sum(g => (long)g.Hltb.TimeData.MainStoryAverage);
-
-                payload.Stats = new ExportedStats
-                {
-                    AllGames = calculateSummaryStats(allGamesInLibrary),
-                    PlayedGames = calculateSummaryStats(playedGames),
-                    UnplayedGames = calculateSummaryStats(unplayedGames),
-                    Backlog = new BacklogStats
-                    {
-                        TotalUnplayedGames = backlogGames.Count,
-                        TotalUnplayedHours = (int)(totalBacklogSeconds / 3600),
-                        CompletionDate = totalBacklogSeconds > 0 ? (DateTime?)DateTime.UtcNow.AddSeconds(totalBacklogSeconds) : null,
-                        LongestBacklogGame = longestBacklogGame == null ? null : new GameTime { Name = longestBacklogGame.Game.Name, Hours = (int)(longestBacklogGame.Hltb.TimeData.MainStoryAverage / 3600) },
-                        ShortestBacklogGame = shortestBacklogGame == null ? null : new GameTime { Name = shortestBacklogGame.Game.Name, Hours = (int)(shortestBacklogGame.Hltb.TimeData.MainStoryAverage / 3600) }
-                    }
-                };
-                payload.FilterOptions = filterOptions;
-
-                // ✅ --- END OF OPTIMIZED DATA AGGREGATION ---
-
-                var tempDir = Path.Combine(Path.GetTempPath(), "PlayniteExport_" + Guid.NewGuid());
-                var imagesDir = Path.Combine(tempDir, "images");
                 Directory.CreateDirectory(imagesDir);
 
-                try
+                var imageCacheDir = Path.Combine(GetPluginUserDataPath(), "ImageCache");
+                var cacheSettingsFile = Path.Combine(imageCacheDir, "cache.settings.json");
+                Directory.CreateDirectory(imageCacheDir);
+
+                var currentCacheSettings = new ImageCacheSettings
                 {
+                    ImageExportFormat = settings.Settings.ImageExportFormat,
+                    CoverWidth = settings.Settings.CoverWidth,
+                    BackgroundWidth = settings.Settings.BackgroundWidth,
+                    ImageQuality = settings.Settings.ImageQuality
+                };
+
+                if (File.Exists(cacheSettingsFile))
+                {
+                    try
+                    {
+                        var savedSettings = Serialization.FromJson<ImageCacheSettings>(File.ReadAllText(cacheSettingsFile));
+                        if (!Serialization.Equals(savedSettings, currentCacheSettings))
+                        {
+                            Directory.Delete(imageCacheDir, true);
+                            Directory.CreateDirectory(imageCacheDir);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Error(ex, "Failed to read or compare image cache settings. Invalidating cache.");
+                        Directory.Delete(imageCacheDir, true);
+                        Directory.CreateDirectory(imageCacheDir);
+                    }
+                }
+
+                PlayniteApi.Dialogs.ActivateGlobalProgress(args =>
+                {
+                    var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
+
+                    args.Text = $"Loading HowLongToBeat data for {allGamesInLibrary.Count} games...";
+                    args.IsIndeterminate = true;
+                    var hltbDataLookup = new Dictionary<Guid, HltbApi.HltbDataItem>();
+                    if (!string.IsNullOrEmpty(hltbPath))
+                    {
+                        foreach (var game in allGamesInLibrary)
+                        {
+                            string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
+                            if (File.Exists(hltbDetailsPath))
+                            {
+                                try
+                                {
+                                    var hltbData = Serialization.FromJson<HltbApi.HltbData>(File.ReadAllText(hltbDetailsPath));
+                                    if (hltbData?.Items?.FirstOrDefault() is HltbApi.HltbDataItem dataItem)
+                                    {
+                                        hltbDataLookup[game.Id] = dataItem;
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    logger.Error(ex, $"Failed to parse HLTB data for game {game.Name} ({game.Id}).");
+                                }
+                            }
+                        }
+                    }
+                    Func<Game, HltbApi.HltbDataItem> getHltbData = (game) => hltbDataLookup.TryGetValue(game.Id, out var data) ? data : null;
+
+                    args.Text = $"Analyzing {allGamesInLibrary.Count} games for stats and filters...";
+                    var playedGames = new List<Game>();
+                    var unplayedGames = new List<Game>();
+                    var sourceCounts = new Dictionary<string, int>();
+                    var completionStatusCounts = new Dictionary<string, int>();
+                    var platformCounts = new Dictionary<string, int>();
+                    var genreCounts = new Dictionary<string, int>();
+                    var developerCounts = new Dictionary<string, int>();
+                    var publisherCounts = new Dictionary<string, int>();
+                    var featureCounts = new Dictionary<string, int>();
+                    var tagCounts = new Dictionary<string, int>();
+                    var seriesCounts = new Dictionary<string, int>();
+                    var ageRatingCounts = new Dictionary<string, int>();
+                    var regionCounts = new Dictionary<string, int>();
+                    var categoryCounts = new Dictionary<string, int>();
+                    var developerLookup = new Dictionary<string, List<Guid>>();
+                    var publisherLookup = new Dictionary<string, List<Guid>>();
+                    var seriesLookup = new Dictionary<string, List<Guid>>();
+
+                    void IncrementCount(Dictionary<string, int> dict, string key)
+                    {
+                        if (string.IsNullOrEmpty(key)) return;
+                        dict.TryGetValue(key, out int currentCount);
+                        dict[key] = currentCount + 1;
+                    }
+
+                    foreach (var game in allGamesInLibrary)
+                    {
+                        if (game.Playtime > 0) { playedGames.Add(game); } else { unplayedGames.Add(game); }
+                        if (game.Source != null) IncrementCount(sourceCounts, game.Source.Name);
+                        IncrementCount(completionStatusCounts, game.CompletionStatus?.Name ?? "Not Set");
+                        if (game.Platforms != null) foreach (var p in game.Platforms) IncrementCount(platformCounts, p.Name);
+                        if (game.Genres != null) foreach (var g in game.Genres) IncrementCount(genreCounts, g.Name);
+                        if (game.Developers != null) foreach (var d in game.Developers) { IncrementCount(developerCounts, d.Name); if (!developerLookup.ContainsKey(d.Name)) developerLookup[d.Name] = new List<Guid>(); developerLookup[d.Name].Add(game.Id); }
+                        if (game.Publishers != null) foreach (var p in game.Publishers) { IncrementCount(publisherCounts, p.Name); if (!publisherLookup.ContainsKey(p.Name)) publisherLookup[p.Name] = new List<Guid>(); publisherLookup[p.Name].Add(game.Id); }
+                        if (game.Features != null) foreach (var f in game.Features) IncrementCount(featureCounts, f.Name);
+                        if (game.Tags != null) foreach (var t in game.Tags) IncrementCount(tagCounts, t.Name);
+                        if (game.Series != null) foreach (var s in game.Series) { IncrementCount(seriesCounts, s.Name); if (!seriesLookup.ContainsKey(s.Name)) seriesLookup[s.Name] = new List<Guid>(); seriesLookup[s.Name].Add(game.Id); }
+                        if (game.AgeRatings != null) foreach (var a in game.AgeRatings) IncrementCount(ageRatingCounts, a.Name);
+                        if (game.Regions != null) foreach (var r in game.Regions) IncrementCount(regionCounts, r.Name);
+                        if (game.Categories != null) foreach (var c in game.Categories) IncrementCount(categoryCounts, c.Name);
+                    }
+
+                    Func<Dictionary<string, int>, List<CountData>> toCountData = (dict) => dict.Select(kvp => new CountData { Name = kvp.Key, Count = kvp.Value }).OrderByDescending(x => x.Count).ToList();
+
+                    var allGamesStats = calculateSummaryStats(allGamesInLibrary);
+                    allGamesStats.AllSources = toCountData(sourceCounts);
+                    allGamesStats.AllPlatforms = toCountData(platformCounts);
+                    allGamesStats.CompletionStatusCounts = toCountData(completionStatusCounts);
+                    allGamesStats.TopGenres = toCountData(genreCounts).Take(5).ToList();
+                    allGamesStats.TopDevelopers = toCountData(developerCounts).Take(5).ToList();
+                    allGamesStats.TopPublishers = toCountData(publisherCounts).Take(5).ToList();
+                    allGamesStats.TopTags = toCountData(tagCounts).Take(5).ToList();
+                    allGamesStats.TopFeatures = toCountData(featureCounts).Take(5).ToList();
+
+                    payload.Stats = new ExportedStats
+                    {
+                        AllGames = allGamesStats,
+                        PlayedGames = calculateSummaryStats(playedGames),
+                        UnplayedGames = calculateSummaryStats(unplayedGames),
+                    };
+
+                    var backlogGames = unplayedGames.Select(g => new { Game = g, Hltb = getHltbData(g) }).Where(x => x.Hltb?.TimeData?.MainStoryAverage > 0).ToList();
+                    var longestBacklogGame = backlogGames.OrderByDescending(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
+                    var shortestBacklogGame = backlogGames.Where(g => g.Hltb.TimeData.MainStoryAverage > 0).OrderBy(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
+                    long totalBacklogSeconds = backlogGames.Sum(g => (long)g.Hltb.TimeData.MainStoryAverage);
+
+                    payload.Stats.Backlog = new BacklogStats
+                    {
+                        TotalUnplayedGames = backlogGames.Count,
+                        TotalUnplayedHours = (int)(totalBacklogSeconds / SecondsInHour),
+                        CompletionDate = totalBacklogSeconds > 0 ? (DateTime?)DateTime.UtcNow.AddSeconds(totalBacklogSeconds) : null,
+                        LongestBacklogGame = longestBacklogGame == null ? null : new GameTime { Name = longestBacklogGame.Game.Name, Hours = (int)(longestBacklogGame.Hltb.TimeData.MainStoryAverage / SecondsInHour) },
+                        ShortestBacklogGame = shortestBacklogGame == null ? null : new GameTime { Name = shortestBacklogGame.Game.Name, Hours = (int)(shortestBacklogGame.Hltb.TimeData.MainStoryAverage / SecondsInHour) }
+                    };
+
+                    payload.FilterOptions = new ExportedFilterOptions
+                    {
+                        Sources = sourceCounts.Keys.OrderBy(n => n).ToList(),
+                        CompletionStatuses = completionStatusCounts.Keys.OrderBy(n => n).ToList(),
+                        Platforms = platformCounts.Keys.OrderBy(n => n).ToList(),
+                        Genres = genreCounts.Keys.OrderBy(n => n).ToList(),
+                        Developers = developerCounts.Keys.OrderBy(n => n).ToList(),
+                        Publishers = publisherCounts.Keys.OrderBy(n => n).ToList(),
+                        Features = featureCounts.Keys.OrderBy(n => n).ToList(),
+                        Tags = tagCounts.Keys.OrderBy(n => n).ToList(),
+                        Series = seriesCounts.Keys.OrderBy(n => n).ToList(),
+                        AgeRatings = ageRatingCounts.Keys.OrderBy(n => n).ToList(),
+                        Regions = regionCounts.Keys.OrderBy(n => n).ToList(),
+                        Categories = categoryCounts.Keys.OrderBy(n => n).ToList()
+                    };
+
+                    ulong maxPlaytimeSeconds = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.Playtime) : 0;
+                    ulong maxInstallSizeBytes = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.InstallSize ?? 0) : 0;
+                    var allHltbTimesInSeconds = hltbDataLookup.Values.Select(h => h.TimeData?.MainStoryAverage ?? 0).Where(t => t > 0).ToList();
+                    ulong maxHltbSeconds = allHltbTimesInSeconds.Any() ? allHltbTimesInSeconds.Max() : 0;
+                    var gamesWithReleaseYear = allGamesInLibrary.Where(g => g.ReleaseDate != null).Select(g => g.ReleaseDate.Value.Year).ToList();
+
+                    int maxPlaytimeHours = maxPlaytimeSeconds > 0 ? (int)Math.Ceiling(maxPlaytimeSeconds / SecondsInHour) : 0;
+                    int maxInstallSizeGb = maxInstallSizeBytes > 0 ? (int)Math.Ceiling(maxInstallSizeBytes / BytesInGigabyte) : 0;
+                    int maxHltbHours = maxHltbSeconds > 0 ? (int)Math.Ceiling(maxHltbSeconds / SecondsInHour) : 0;
+                    int minReleaseYear = gamesWithReleaseYear.Any() ? gamesWithReleaseYear.Min() : 1990;
+                    int maxReleaseYear = gamesWithReleaseYear.Any() ? gamesWithReleaseYear.Max() : DateTime.Now.Year;
+
+                    payload.FilterOptions.PlaytimeRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxPlaytimeHours) };
+                    payload.FilterOptions.InstallSizeRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxInstallSizeGb) };
+                    payload.FilterOptions.HltbMainStoryRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxHltbHours) };
+                    payload.FilterOptions.ReleaseYearRange = new RangeData { LowerBound = minReleaseYear, UpperBound = maxReleaseYear };
+
                     args.ProgressMaxValue = gamesToProcess.Count;
-                    args.IsIndeterminate = false; // Switch to determinate progress for game processing.
+                    args.IsIndeterminate = false;
                     var processedGames = new ConcurrentBag<GameExport>();
                     int progress = 0;
 
                     Parallel.ForEach(gamesToProcess, (game) =>
                     {
                         if (args.CancelToken.IsCancellationRequested) return;
-                        var gameExport = CreateGameExport(game, hltbPath, imagesDir, developerLookup, publisherLookup, seriesLookup, currentIds);
+                        var gameExport = CreateGameExport(game, getHltbData(game), imagesDir, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds);
                         if (gameExport != null) processedGames.Add(gameExport);
                         Interlocked.Increment(ref progress);
                         args.CurrentProgressValue = progress;
@@ -602,35 +633,41 @@ namespace PlayniteGo
 
                     SaveLastExportDate(exportDate);
                     SaveExportedIds(currentIds);
+                    File.WriteAllText(cacheSettingsFile, Serialization.ToJson(currentCacheSettings));
                     wasSuccess = true;
-                }
-                catch (Exception ex)
-                {
-                    logger.Error(ex, "Failed during export process.");
-                    PlayniteApi.MainView.UIDispatcher.Invoke(() => { PlayniteApi.Dialogs.ShowErrorMessage($"Export failed: {ex.Message}", "Error"); });
-                    wasSuccess = false;
-                }
-                finally
-                {
-                    if (Directory.Exists(tempDir)) { try { Directory.Delete(tempDir, true); } catch (Exception ex) { logger.Error(ex, "Failed to cleanup temp directory."); } }
-                }
-            }, new GlobalProgressOptions(progressMessage, true) { IsIndeterminate = false });
+                }, new GlobalProgressOptions(progressMessage, true) { IsIndeterminate = true });
+            }
+            catch (IOException ioEx)
+            {
+                logger.Error(ioEx, "Export failed due to a file system error.");
+                PlayniteApi.MainView.UIDispatcher.Invoke(() => {
+                    PlayniteApi.Dialogs.ShowErrorMessage(
+                        $"Export failed. A file system error occurred, which could be due to a lack of disk space or an issue with the destination folder.\n\nDetails: {ioEx.Message}",
+                        "File Error");
+                });
+                wasSuccess = false;
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "Failed during export process.");
+                PlayniteApi.MainView.UIDispatcher.Invoke(() => { PlayniteApi.Dialogs.ShowErrorMessage($"Export failed: {ex.Message}", "Error"); });
+                wasSuccess = false;
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir)) { try { Directory.Delete(tempDir, true); } catch (Exception ex) { logger.Error(ex, "Failed to cleanup temp directory."); } }
+            }
             return wasSuccess;
         }
 
-
-
-        private GameExport CreateGameExport(Game game, string hltbPath, string imagesDir,
+        private GameExport CreateGameExport(Game game, HltbApi.HltbDataItem hltbData, string tempImagesDir, string imageCacheDir,
             Dictionary<string, List<Guid>> developerLookup,
             Dictionary<string, List<Guid>> publisherLookup,
             Dictionary<string, List<Guid>> seriesLookup,
             HashSet<Guid> allExportedGameIds)
         {
-            var hltbData = GetHltbData(game, hltbPath);
-
             var gameExport = new GameExport
             {
-                // --- CORE DATA ---
                 Id = game.Id,
                 Name = game.Name,
                 Source = game.Source?.Name,
@@ -645,13 +682,11 @@ namespace PlayniteGo
                 IsInstalled = game.IsInstalled,
                 Favorite = game.Favorite,
                 SortingName = game.SortingName,
-                ReleaseDate = game.ReleaseDate?.Date,
+                ReleaseDate = game.ReleaseDate,
                 UserScore = game.UserScore,
                 Notes = game.Notes,
                 InstallSize = game.InstallSize,
                 HowLongToBeatData = hltbData,
-
-                // --- CORE RELATIONSHIPS (RAW DATA) ---
                 Platforms = game.Platforms?.Select(p => p.Name).ToList() ?? new List<string>(),
                 Genres = game.Genres?.Select(g => g.Name).ToList() ?? new List<string>(),
                 Features = game.Features?.Select(f => f.Name).ToList() ?? new List<string>(),
@@ -663,17 +698,13 @@ namespace PlayniteGo
                 Tags = game.Tags?.Select(t => t.Name).ToList() ?? new List<string>(),
                 Categories = game.Categories?.Select(c => c.Name).ToList() ?? new List<string>(),
                 Regions = game.Regions?.Select(r => r.Name).ToList() ?? new List<string>(),
-
-                // --- IMAGE PROCESSING ---
-                CoverImagePath = ProcessAndCopyLocalImage(game.CoverImage, imagesDir, ImageType.Cover),
-                BackgroundImagePath = ProcessAndCopyLocalImage(game.BackgroundImage, imagesDir, ImageType.Background),
+                CoverImagePath = ProcessAndCopyLocalImage(game.CoverImage, tempImagesDir, imageCacheDir, ImageType.Cover),
+                BackgroundImagePath = ProcessAndCopyLocalImage(game.BackgroundImage, tempImagesDir, imageCacheDir, ImageType.Background),
             };
 
-            // --- PRE-COMPUTATION LOGIC ---
             gameExport.PlainTextDescription = StripHtml(game.Description);
             gameExport.ReleaseYear = game.ReleaseDate?.Year;
             gameExport.HltbMainStoryInSeconds = (long?)(hltbData?.TimeData?.MainStoryAverage);
-
             gameExport.DisplayPlatformNames = FormatPlatformNames(game.Platforms);
             gameExport.DisplayFirstGenre = FormatFirstGenre(game.Genres?.FirstOrDefault()?.Name);
             gameExport.DisplayContributors = FormatContributors(game.Developers, game.Publishers);
@@ -682,17 +713,10 @@ namespace PlayniteGo
             gameExport.DisplayInstallSize = FormatInstallSize(game.InstallSize);
             gameExport.DisplayAddedDate = FormatShortDate(game.Added);
             gameExport.DisplayLastPlayed = FormatShortDate(game.LastActivity);
-
-            var allFeatures = new HashSet<string>(
-                (game.Features?.Select(f => f.Name.ToLowerInvariant()) ?? Enumerable.Empty<string>())
-                .Concat(game.Tags?.Select(t => t.Name.ToLowerInvariant()) ?? Enumerable.Empty<string>())
-            );
-
-            gameExport.HasControllerSupport = allFeatures.Any(f => f.Contains("controller"));
-            gameExport.HasVRSupport = allFeatures.Any(f => f == "vr" || f == "virtual reality" || f == "virtual-reality");
-            gameExport.HasUltrawideSupport = allFeatures.Any(f => f.Contains("ultrawide") || f.Contains("ultra-wide"));
-            gameExport.HasHDRSupport = allFeatures.Any(f => f.Contains("hdr"));
-
+            gameExport.HasControllerSupport = CheckSupport(game, ControllerKeywords);
+            gameExport.HasVRSupport = CheckSupport(game, VrKeywords);
+            gameExport.HasUltrawideSupport = CheckSupport(game, UltrawideKeywords);
+            gameExport.HasHDRSupport = CheckSupport(game, HdrKeywords);
 
             var relatedDeveloperIds = new HashSet<Guid>();
             if (game.Developers != null)
@@ -754,25 +778,6 @@ namespace PlayniteGo
             return gameExport;
         }
 
-        // --- HELPER METHODS RE-ADDED ---
-
-        private HltbApi.HltbDataItem GetHltbData(Game game, string hltbPath)
-        {
-            if (game == null || string.IsNullOrEmpty(hltbPath)) return null;
-            string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
-            if (!File.Exists(hltbDetailsPath)) return null;
-            try
-            {
-                var hltbData = Serialization.FromJson<HltbApi.HltbData>(File.ReadAllText(hltbDetailsPath));
-                return hltbData?.Items?.FirstOrDefault();
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex, $"Failed to parse HLTB data for game {game.Name} ({game.Id}).");
-                return null;
-            }
-        }
-
         private bool CheckPrerequisites(out string hltbPath, out bool hltbFound)
         {
             hltbPath = GetEffectivePath(hltbPluginId);
@@ -794,7 +799,7 @@ namespace PlayniteGo
             return plugin.GetPluginUserDataPath();
         }
 
-        private string ProcessAndCopyLocalImage(string databasePath, string destinationFolder, ImageType type)
+        private string ProcessAndCopyLocalImage(string databasePath, string tempImagesDir, string imageCacheDir, ImageType type)
         {
             if (string.IsNullOrEmpty(databasePath) || databasePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
@@ -809,94 +814,137 @@ namespace PlayniteGo
             }
 
             string originalFileName = Path.GetFileName(databasePath);
-            string newFileName = originalFileName;
-            string destinationPath = Path.Combine(destinationFolder, originalFileName);
+            string targetFileName = originalFileName;
 
-            if (settings.Settings.ImageExportFormat == "Copy Original")
+            if (settings.Settings.ImageExportFormat == "WebP")
+            {
+                targetFileName = Path.ChangeExtension(originalFileName, ".webp");
+            }
+            else if (settings.Settings.ImageExportFormat == "JPEG")
+            {
+                targetFileName = Path.ChangeExtension(originalFileName, ".jpg");
+            }
+
+            string cachedFilePath = Path.Combine(imageCacheDir, targetFileName);
+            string finalExportPath = Path.Combine(tempImagesDir, targetFileName);
+
+            if (File.Exists(cachedFilePath) && File.GetLastWriteTimeUtc(sourcePath) <= File.GetLastWriteTimeUtc(cachedFilePath))
             {
                 try
                 {
-                    if (!File.Exists(destinationPath) || File.GetLastWriteTimeUtc(sourcePath) > File.GetLastWriteTimeUtc(destinationPath))
-                    {
-                        File.Copy(sourcePath, destinationPath, true);
-                    }
-                    return originalFileName;
+                    File.Copy(cachedFilePath, finalExportPath, true);
+                    return targetFileName;
                 }
                 catch (Exception ex)
                 {
-                    logger.Error(ex, $"Failed to copy original file: {sourcePath}");
-                    return null;
+                    logger.Error(ex, $"Failed to copy from cache. File: {cachedFilePath}");
                 }
             }
 
             try
             {
-                using (var image = Image.Load(sourcePath))
+                if (settings.Settings.ImageExportFormat == "Copy Original")
                 {
-                    double targetWidthDimension = (type == ImageType.Cover) ? settings.Settings.CoverWidth : settings.Settings.BackgroundWidth;
-
-                    if (targetWidthDimension <= 0) // Skip resizing if width is not set
-                    {
-                        if (!File.Exists(destinationPath) || File.GetLastWriteTimeUtc(sourcePath) > File.GetLastWriteTimeUtc(destinationPath))
-                        {
-                            File.Copy(sourcePath, destinationPath, true);
-                        }
-                        return originalFileName;
-                    }
-
-                    double scaleFactor = targetWidthDimension / image.Width;
-
-                    int targetWidth = (scaleFactor < 1.0) ? (int)(image.Width * scaleFactor) : image.Width;
-                    int targetHeight = (scaleFactor < 1.0) ? (int)(image.Height * scaleFactor) : image.Height;
-
-                    if (targetWidth == 0) targetWidth = 1;
-                    if (targetHeight == 0) targetHeight = 1;
-
-                    image.Mutate(x => x.Resize(new ResizeOptions
-                    {
-                        Size = new Size(targetWidth, targetHeight),
-                        Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max
-                    }));
-
-                    if (settings.Settings.ImageExportFormat == "WebP")
-                    {
-                        newFileName = Path.ChangeExtension(originalFileName, ".webp");
-                        destinationPath = Path.Combine(destinationFolder, newFileName);
-                        if (!File.Exists(destinationPath) || File.GetLastWriteTimeUtc(sourcePath) > File.GetLastWriteTimeUtc(destinationPath))
-                        {
-                            image.SaveAsWebp(destinationPath, new WebpEncoder { Quality = settings.Settings.ImageQuality });
-                        }
-                    }
-                    else // JPEG
-                    {
-                        newFileName = Path.ChangeExtension(originalFileName, ".jpg");
-                        destinationPath = Path.Combine(destinationFolder, newFileName);
-                        if (!File.Exists(destinationPath) || File.GetLastWriteTimeUtc(sourcePath) > File.GetLastWriteTimeUtc(destinationPath))
-                        {
-                            image.SaveAsJpeg(destinationPath, new JpegEncoder { Quality = settings.Settings.ImageQuality });
-                        }
-                    }
-                    return newFileName;
+                    File.Copy(sourcePath, cachedFilePath, true);
                 }
+                else
+                {
+                    using (var image = Image.Load(sourcePath))
+                    {
+                        double targetWidthDimension = (type == ImageType.Cover) ? settings.Settings.CoverWidth : settings.Settings.BackgroundWidth;
+
+                        if (targetWidthDimension > 0)
+                        {
+                            double scaleFactor = targetWidthDimension / image.Width;
+                            int targetWidth = (scaleFactor < 1.0) ? (int)(image.Width * scaleFactor) : image.Width;
+                            int targetHeight = (scaleFactor < 1.0) ? (int)(image.Height * scaleFactor) : image.Height;
+                            if (targetWidth == 0) targetWidth = 1;
+                            if (targetHeight == 0) targetHeight = 1;
+
+                            image.Mutate(x => x.Resize(new ResizeOptions
+                            {
+                                Size = new Size(targetWidth, targetHeight),
+                                Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max
+                            }));
+                        }
+
+                        if (settings.Settings.ImageExportFormat == "WebP")
+                        {
+                            image.SaveAsWebp(cachedFilePath, new WebpEncoder { Quality = settings.Settings.ImageQuality });
+                        }
+                        else // JPEG
+                        {
+                            image.SaveAsJpeg(cachedFilePath, new JpegEncoder { Quality = settings.Settings.ImageQuality });
+                        }
+                    }
+                }
+
+                File.Copy(cachedFilePath, finalExportPath, true);
+                return targetFileName;
             }
             catch (Exception ex)
             {
-                logger.Error(ex, $"Failed to process image: {sourcePath}. Copying original file as a fallback.");
-                try
+                logger.Error(ex, $"Failed to process and cache image: {sourcePath}.");
+                return null;
+            }
+        }
+
+        private SummaryStats calculateSummaryStats(List<Game> games)
+        {
+            if (!games.Any()) return new SummaryStats { TotalGames = 0 };
+
+            long totalPlaytimeSeconds = 0;
+            Game mostPlayed = null;
+            Game leastPlayed = null;
+            Game oldestRelease = null;
+            Game newestRelease = null;
+            Game oldestAdded = null;
+            Game newestAdded = null;
+
+            foreach (var game in games)
+            {
+                totalPlaytimeSeconds += (long)game.Playtime;
+
+                if (game.Playtime > 0)
                 {
-                    string fallbackDestPath = Path.Combine(destinationFolder, originalFileName);
-                    if (!File.Exists(fallbackDestPath) || File.GetLastWriteTimeUtc(sourcePath) > File.GetLastWriteTimeUtc(fallbackDestPath))
-                    {
-                        File.Copy(sourcePath, fallbackDestPath, true);
-                    }
-                    return originalFileName;
+                    if (mostPlayed == null || game.Playtime > mostPlayed.Playtime) mostPlayed = game;
+                    if (leastPlayed == null || game.Playtime < leastPlayed.Playtime) leastPlayed = game;
                 }
-                catch (Exception copyEx)
+
+                if (game.ReleaseDate != null)
                 {
-                    logger.Error(copyEx, $"Failed to copy original file as fallback: {sourcePath}");
-                    return null;
+                    if (oldestRelease == null || game.ReleaseDate.Value.CompareTo(oldestRelease.ReleaseDate.Value) < 0) oldestRelease = game;
+                    if (newestRelease == null || game.ReleaseDate.Value.CompareTo(newestRelease.ReleaseDate.Value) > 0) newestRelease = game;
+                }
+
+                if (game.Added != null)
+                {
+                    if (oldestAdded == null || game.Added.Value < oldestAdded.Added.Value) oldestAdded = game;
+                    if (newestAdded == null || game.Added.Value > newestAdded.Added.Value) newestAdded = game;
                 }
             }
+
+            var playedGamesStats = games.Where(g => g.Playtime > 0).ToList();
+
+            return new SummaryStats
+            {
+                TotalGames = games.Count,
+                GamesPlayedCount = playedGamesStats.Count,
+                TotalPlaytimeHours = (int)(totalPlaytimeSeconds / SecondsInHour),
+                MostPlayedGame = mostPlayed == null ? null : new GameTime { Name = mostPlayed.Name, Hours = (int)(mostPlayed.Playtime / SecondsInHour) },
+                LeastPlayedGame = leastPlayed == null ? null : new GameTime { Name = leastPlayed.Name, Hours = (int)(leastPlayed.Playtime / SecondsInHour) },
+                GamesByDecade = games.Where(g => g.ReleaseDate != null).GroupBy(g => (g.ReleaseDate.Value.Year / 10) * 10).Select(g => new CountData { Name = $"{g.Key}s", Count = g.Count() }).OrderBy(x => x.Name).ToList(),
+                TopCriticRated = games.Where(g => g.CriticScore != null && g.CriticScore > 0).OrderByDescending(g => g.CriticScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CriticScore.Value }).ToList(),
+                BottomCriticRated = games.Where(g => g.CriticScore != null && g.CriticScore > 0).OrderBy(g => g.CriticScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CriticScore.Value }).ToList(),
+                TopCommunityRated = games.Where(g => g.CommunityScore != null && g.CommunityScore > 0).OrderByDescending(g => g.CommunityScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CommunityScore.Value }).ToList(),
+                BottomCommunityRated = games.Where(g => g.CommunityScore != null && g.CommunityScore > 0).OrderBy(g => g.CommunityScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CommunityScore.Value }).ToList(),
+                TopUserRated = games.Where(g => g.UserScore != null && g.UserScore > 0).OrderByDescending(g => g.UserScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.UserScore.Value }).ToList(),
+                BottomUserRated = games.Where(g => g.UserScore != null && g.UserScore > 0).OrderBy(g => g.UserScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.UserScore.Value }).ToList(),
+                OldestRelease = oldestRelease == null ? null : new GameScore { Name = oldestRelease.Name, Score = oldestRelease.ReleaseDate.Value.Year },
+                NewestRelease = newestRelease == null ? null : new GameScore { Name = newestRelease.Name, Score = newestRelease.ReleaseDate.Value.Year },
+                OldestAdded = oldestAdded == null ? null : new GameScore { Name = oldestAdded.Name, Score = oldestAdded.Added.Value.Year },
+                NewestAdded = newestAdded == null ? null : new GameScore { Name = newestAdded.Name, Score = newestAdded.Added.Value.Year }
+            };
         }
 
         private void SaveLastExportDate(DateTime date)
@@ -957,28 +1005,15 @@ namespace PlayniteGo
             }
         }
 
-        // --- PRE-COMPUTATION HELPER METHODS ---
-
         private static string StripHtml(string html)
         {
             if (string.IsNullOrEmpty(html)) return null;
 
             string text = html;
-
-            // 1. Replace <br> tags with newlines
             text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
-
-            // 2. Replace closing block tags with newlines to create paragraph breaks
             text = Regex.Replace(text, @"</(p|div|h[1-6]|li)>", "\n", RegexOptions.IgnoreCase);
-
-            // 3. Strip all other HTML tags (including opening block tags now)
             text = Regex.Replace(text, @"<[^>]+>", string.Empty);
-
-            // 4. Decode HTML entities
             text = WebUtility.HtmlDecode(text);
-
-            // 5. Clean up whitespace and newlines
-            // Replace multiple newlines with a single newline
             text = Regex.Replace(text, @"(\s*\n\s*)+", "\n");
             text = text.Trim();
 
@@ -1024,25 +1059,23 @@ namespace PlayniteGo
         private static string FormatPlaytime(ulong playtimeInSeconds)
         {
             if (playtimeInSeconds <= 0) return "";
-            return $"{playtimeInSeconds / 3600}h";
+            return $"{(int)(playtimeInSeconds / SecondsInHour)}h";
         }
 
         private static string FormatHltbMain(ulong? hltbMainInSeconds)
         {
             if (hltbMainInSeconds == null || hltbMainInSeconds <= 0) return null;
-            return $"{hltbMainInSeconds / 3600}h";
+            return $"{(int)(hltbMainInSeconds / SecondsInHour)}h";
         }
 
         private static string FormatInstallSize(ulong? installSizeInBytes)
         {
             if (installSizeInBytes == null || installSizeInBytes <= 0) return null;
-            const long gb = 1073741824;
-            const long mb = 1048576;
-            if (installSizeInBytes >= gb)
+            if (installSizeInBytes >= BytesInGigabyte)
             {
-                return string.Format("{0:0.##} GB", (double)installSizeInBytes / gb);
+                return string.Format("{0:0.##} GB", (double)installSizeInBytes / BytesInGigabyte);
             }
-            return string.Format("{0:0} MB", (double)installSizeInBytes / mb);
+            return string.Format("{0:0} MB", (double)installSizeInBytes / BytesInMegabyte);
         }
 
         private static string FormatShortDate(DateTime? date)
@@ -1060,8 +1093,6 @@ namespace PlayniteGo
             sb.AppendLine("--- PlayniteGo Diagnostic Report ---");
             sb.AppendLine($"Report Generated: {DateTime.Now}");
             sb.AppendLine();
-
-            // --- System & Version Info ---
             sb.AppendLine("## System & Version Info ##");
             try
             {
@@ -1074,8 +1105,6 @@ namespace PlayniteGo
                 sb.AppendLine("Error getting version info: " + ex.Message);
             }
             sb.AppendLine();
-
-            // --- Plugin Settings ---
             sb.AppendLine("## PlayniteGo Settings ##");
             try
             {
@@ -1087,23 +1116,15 @@ namespace PlayniteGo
                 sb.AppendLine("Error getting plugin settings: " + ex.Message);
             }
             sb.AppendLine();
-
-            // --- Installed Plugins ---
             sb.AppendLine("## Installed Plugins ##");
             try
             {
                 sb.AppendLine("## Installed Plugins ##");
-
-                // --- Enabled Plugins ---
-                // The API in this environment appears to have non-standard types.
-                // We will print the information we can reliably get.
                 sb.AppendLine("\n### Enabled Plugins ###");
                 foreach (var plugin in PlayniteApi.Addons.Plugins)
                 {
                     sb.AppendLine($"- Type: {plugin.GetType().FullName}, ID: {plugin.Id}");
                 }
-
-                // --- Disabled Plugins ---
                 if (PlayniteApi.Addons.DisabledAddons is System.Collections.Generic.IEnumerable<string> disabledAddonIds && disabledAddonIds.Any())
                 {
                     sb.AppendLine("\n### Disabled Plugins ###");
@@ -1112,8 +1133,6 @@ namespace PlayniteGo
                         sb.AppendLine($"- ID: {idString} (DISABLED)");
                     }
                 }
-
-                // --- All Addons (as reported by API) ---
                 if (PlayniteApi.Addons.Addons is System.Collections.Generic.IEnumerable<string> allAddonIds && allAddonIds.Any())
                 {
                     sb.AppendLine("\n### All Addon IDs ###");
@@ -1128,8 +1147,6 @@ namespace PlayniteGo
                 sb.AppendLine("Error getting installed plugins: " + ex.Message);
             }
             sb.AppendLine();
-
-            // --- Playnite Config ---
             sb.AppendLine("## Playnite Config ##");
             try
             {
@@ -1148,9 +1165,6 @@ namespace PlayniteGo
                 sb.AppendLine("Error reading Playnite config: " + ex.Message);
             }
             sb.AppendLine();
-
-
-            // --- Recent Log Entries ---
             sb.AppendLine("--- Recent Playnite Log Entries ---");
             try
             {
@@ -1174,7 +1188,6 @@ namespace PlayniteGo
 
             return sb.ToString();
         }
-
 
         public override ISettings GetSettings(bool firstRunSettings) => settings;
 
