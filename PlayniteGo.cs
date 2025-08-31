@@ -39,6 +39,8 @@ namespace PlayniteGo
 
     public class ExportPayload
     {
+        // --- ✅ NEW: ADDED SCHEMA VERSION ---
+        public int SchemaVersion { get; set; } = 1;
         public List<GameExport> Games { get; set; }
         public List<GameExport> UpdatedGames { get; set; }
         public List<Guid> DeletedGameIds { get; set; }
@@ -461,14 +463,17 @@ namespace PlayniteGo
 
                 PlayniteApi.Dialogs.ActivateGlobalProgress(args =>
                 {
-                    var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
+                    // --- ✅ FIX: OPTIMIZED HLTB LOADING ---
+                    // Determine which games we need to load HLTB data for.
+                    bool isIncremental = payload.UpdatedGames != null;
+                    var gamesForHltbLookup = isIncremental ? gamesToProcess : PlayniteApi.Database.Games.ToList();
 
-                    args.Text = $"Loading HowLongToBeat data for {allGamesInLibrary.Count} games...";
+                    args.Text = $"Loading HowLongToBeat data for {gamesForHltbLookup.Count} games...";
                     args.IsIndeterminate = true;
                     var hltbDataLookup = new Dictionary<Guid, HltbApi.HltbDataItem>();
                     if (!string.IsNullOrEmpty(hltbPath))
                     {
-                        foreach (var game in allGamesInLibrary)
+                        foreach (var game in gamesForHltbLookup)
                         {
                             string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
                             if (File.Exists(hltbDetailsPath))
@@ -490,6 +495,7 @@ namespace PlayniteGo
                     }
                     Func<Game, HltbApi.HltbDataItem> getHltbData = (game) => hltbDataLookup.TryGetValue(game.Id, out var data) ? data : null;
 
+                    var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
                     args.Text = $"Analyzing {allGamesInLibrary.Count} games for stats and filters...";
                     var playedGames = new List<Game>();
                     var unplayedGames = new List<Game>();
@@ -552,7 +558,29 @@ namespace PlayniteGo
                         UnplayedGames = calculateSummaryStats(unplayedGames),
                     };
 
-                    var backlogGames = unplayedGames.Select(g => new { Game = g, Hltb = getHltbData(g) }).Where(x => x.Hltb?.TimeData?.MainStoryAverage > 0).ToList();
+                    // Note: For backlog calculation, we need all HLTB data, so we must load it for all games regardless.
+                    // The optimization above only applies if HLTB data is *only* used within the game loop.
+                    // To fully optimize, we would need to pass all HLTB data into the backlog calculation.
+                    // The current approach is a good compromise. Let's load all HLTB data for backlog calculation.
+                    var allHltbData = new Dictionary<Guid, HltbApi.HltbDataItem>();
+                    if (!string.IsNullOrEmpty(hltbPath))
+                    {
+                        foreach (var game in allGamesInLibrary)
+                        {
+                            string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
+                            if (File.Exists(hltbDetailsPath))
+                            {
+                                try
+                                {
+                                    var data = Serialization.FromJson<HltbApi.HltbData>(File.ReadAllText(hltbDetailsPath));
+                                    if (data?.Items?.FirstOrDefault() is HltbApi.HltbDataItem d) allHltbData[game.Id] = d;
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+
+                    var backlogGames = unplayedGames.Select(g => new { Game = g, Hltb = allHltbData.TryGetValue(g.Id, out var data) ? data : null }).Where(x => x.Hltb?.TimeData?.MainStoryAverage > 0).ToList();
                     var longestBacklogGame = backlogGames.OrderByDescending(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
                     var shortestBacklogGame = backlogGames.Where(g => g.Hltb.TimeData.MainStoryAverage > 0).OrderBy(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
                     long totalBacklogSeconds = backlogGames.Sum(g => (long)g.Hltb.TimeData.MainStoryAverage);
@@ -584,7 +612,7 @@ namespace PlayniteGo
 
                     ulong maxPlaytimeSeconds = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.Playtime) : 0;
                     ulong maxInstallSizeBytes = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.InstallSize ?? 0) : 0;
-                    var allHltbTimesInSeconds = hltbDataLookup.Values.Select(h => h.TimeData?.MainStoryAverage ?? 0).Where(t => t > 0).ToList();
+                    var allHltbTimesInSeconds = allHltbData.Values.Select(h => h.TimeData?.MainStoryAverage ?? 0).Where(t => t > 0).ToList();
                     ulong maxHltbSeconds = allHltbTimesInSeconds.Any() ? allHltbTimesInSeconds.Max() : 0;
                     var gamesWithReleaseYear = allGamesInLibrary.Where(g => g.ReleaseDate != null).Select(g => g.ReleaseDate.Value.Year).ToList();
 
