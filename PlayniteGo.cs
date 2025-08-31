@@ -285,6 +285,13 @@ namespace PlayniteGo
                     MenuSection = "@PlayniteGo",
                     Action = (actionArgs) => PerformFullExport()
                 },
+                // ✅ ADDED NEW MENU ITEM
+                new MainMenuItem
+                {
+                    Description = "Export Selected/Filtered Games...",
+                    MenuSection = "@PlayniteGo",
+                    Action = (actionArgs) => PerformFilteredExport()
+                },
                 new MainMenuItem
                 {
                     Description = "Sync Changes to App",
@@ -390,6 +397,39 @@ namespace PlayniteGo
             }
         }
 
+        // ✅ ADDED NEW METHOD
+        private void PerformFilteredExport()
+        {
+            try
+            {
+                if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
+
+                // Get selected games, or fallback to the currently filtered list
+                var gamesToExport = PlayniteApi.MainView.SelectedGames?.ToList();
+                if (gamesToExport == null || !gamesToExport.Any())
+                {
+                    gamesToExport = PlayniteApi.MainView.FilteredGames.ToList();
+                }
+
+                if (!gamesToExport.Any())
+                {
+                    PlayniteApi.Dialogs.ShowMessage("No games are selected or filtered to export.", "PlayniteGo Export");
+                    return;
+                }
+
+                var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
+                if (string.IsNullOrEmpty(result)) return;
+
+                // Call the new partial export method to create the correct payload
+                ExecutePartialExport(gamesToExport, result, hltbPath, "Exporting current view...");
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "Failed to perform filtered export.");
+                PlayniteApi.Dialogs.ShowErrorMessage("An unexpected error occurred during the filtered export.", "PlayniteGo Error");
+            }
+        }
+
         private void ExecuteFullExport(List<Game> gamesToProcess, string exportZipPath, string hltbPath, string progressMessage)
         {
             var allGameIds = Enumerable.ToHashSet(gamesToProcess.Select(g => g.Id));
@@ -400,6 +440,22 @@ namespace PlayniteGo
             if (success)
             {
                 PlayniteApi.Dialogs.ShowMessage($"Successfully exported {payload.Games.Count} games.", "Export Complete");
+            }
+        }
+
+        // ✅ ADDED NEW METHOD
+        private void ExecutePartialExport(List<Game> gamesToProcess, string exportZipPath, string hltbPath, string progressMessage)
+        {
+            var allGameIds = Enumerable.ToHashSet(PlayniteApi.Database.Games.Select(g => g.Id));
+            // This payload uses "UpdatedGames" to signal a partial update to the iOS app
+            var payload = new ExportPayload { UpdatedGames = new List<GameExport>() };
+            var exportDate = DateTime.UtcNow;
+
+            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, allGameIds, hltbPath, progressMessage, exportDate);
+            if (success)
+            {
+                // Note the change here to use payload.UpdatedGames.Count
+                PlayniteApi.Dialogs.ShowMessage($"Successfully exported {payload.UpdatedGames.Count} games.", "Export Complete");
             }
         }
 
@@ -734,7 +790,7 @@ namespace PlayniteGo
             gameExport.ReleaseYear = game.ReleaseDate?.Year;
             gameExport.HltbMainStoryInSeconds = (long?)(hltbData?.TimeData?.MainStoryAverage);
             gameExport.DisplayPlatformNames = FormatPlatformNames(game.Platforms);
-            gameExport.DisplayFirstGenre = FormatFirstGenre(game.Genres?.FirstOrDefault()?.Name);
+            gameExport.DisplayFirstGenre = FormatFirstGenre(game.Genres);
             gameExport.DisplayContributors = FormatContributors(game.Developers, game.Publishers);
             gameExport.DisplayPlaytime = FormatPlaytime(game.Playtime);
             gameExport.DisplayHltbMain = FormatHltbMain(hltbData?.TimeData?.MainStoryAverage);
@@ -1062,7 +1118,25 @@ namespace PlayniteGo
             }));
         }
 
-        private static string FormatFirstGenre(string genre)
+        private static string FormatFirstGenre(IEnumerable<Genre> genres)
+        {
+            if (genres == null) return null;
+            var genreList = genres.ToList();
+            if (!genreList.Any()) return null;
+
+            // Find the first genre that is NOT "2D" or "3D"
+            var bestGenre = genreList.FirstOrDefault(g => g.Name != "2D" && g.Name != "3D");
+
+            // If a better genre was found, use it. If not (meaning the only genres are "2D" or "3D"),
+            // just use the very first one from the original list so something is always displayed.
+            var genreToDisplay = bestGenre ?? genreList.FirstOrDefault();
+
+            // Abbreviate the chosen genre name using our new helper
+            return AbbreviateGenre(genreToDisplay?.Name);
+        }
+
+        // The old logic is now in its own helper method
+        private static string AbbreviateGenre(string genre)
         {
             if (string.IsNullOrEmpty(genre)) return null;
             switch (genre)
