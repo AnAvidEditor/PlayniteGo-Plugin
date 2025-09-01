@@ -277,24 +277,18 @@ namespace PlayniteGo
 
         public override IEnumerable<MainMenuItem> GetMainMenuItems(GetMainMenuItemsArgs args)
         {
+            // ✅ MODIFIED: Simplified the menu to two main actions
             var menuItems = new List<MainMenuItem>
             {
                 new MainMenuItem
                 {
-                    Description = "Full Export to App",
+                    Description = "Export Full Library (Destructive)",
                     MenuSection = "@PlayniteGo",
                     Action = (actionArgs) => PerformFullExport()
                 },
-                // ✅ ADDED NEW MENU ITEM
                 new MainMenuItem
                 {
-                    Description = "Export Selected/Filtered Games...",
-                    MenuSection = "@PlayniteGo",
-                    Action = (actionArgs) => PerformFilteredExport()
-                },
-                new MainMenuItem
-                {
-                    Description = "Sync Changes to App",
+                    Description = "Export Changes (Since Last Export)",
                     MenuSection = "@PlayniteGo",
                     Action = (actionArgs) => PerformIncrementalExport()
                 },
@@ -397,39 +391,6 @@ namespace PlayniteGo
             }
         }
 
-        // ✅ ADDED NEW METHOD
-        private void PerformFilteredExport()
-        {
-            try
-            {
-                if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
-
-                // Get selected games, or fallback to the currently filtered list
-                var gamesToExport = PlayniteApi.MainView.SelectedGames?.ToList();
-                if (gamesToExport == null || !gamesToExport.Any())
-                {
-                    gamesToExport = PlayniteApi.MainView.FilteredGames.ToList();
-                }
-
-                if (!gamesToExport.Any())
-                {
-                    PlayniteApi.Dialogs.ShowMessage("No games are selected or filtered to export.", "PlayniteGo Export");
-                    return;
-                }
-
-                var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
-                if (string.IsNullOrEmpty(result)) return;
-
-                // Call the new partial export method to create the correct payload
-                ExecutePartialExport(gamesToExport, result, hltbPath, "Exporting current view...");
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex, "Failed to perform filtered export.");
-                PlayniteApi.Dialogs.ShowErrorMessage("An unexpected error occurred during the filtered export.", "PlayniteGo Error");
-            }
-        }
-
         private void ExecuteFullExport(List<Game> gamesToProcess, string exportZipPath, string hltbPath, string progressMessage)
         {
             var allGameIds = Enumerable.ToHashSet(gamesToProcess.Select(g => g.Id));
@@ -440,22 +401,6 @@ namespace PlayniteGo
             if (success)
             {
                 PlayniteApi.Dialogs.ShowMessage($"Successfully exported {payload.Games.Count} games.", "Export Complete");
-            }
-        }
-
-        // ✅ ADDED NEW METHOD
-        private void ExecutePartialExport(List<Game> gamesToProcess, string exportZipPath, string hltbPath, string progressMessage)
-        {
-            var allGameIds = Enumerable.ToHashSet(PlayniteApi.Database.Games.Select(g => g.Id));
-            // This payload uses "UpdatedGames" to signal a partial update to the iOS app
-            var payload = new ExportPayload { UpdatedGames = new List<GameExport>() };
-            var exportDate = DateTime.UtcNow;
-
-            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, allGameIds, hltbPath, progressMessage, exportDate);
-            if (success)
-            {
-                // Note the change here to use payload.UpdatedGames.Count
-                PlayniteApi.Dialogs.ShowMessage($"Successfully exported {payload.UpdatedGames.Count} games.", "Export Complete");
             }
         }
 
@@ -1118,6 +1063,18 @@ namespace PlayniteGo
             }));
         }
 
+        private static string AbbreviateGenre(string genre)
+        {
+            if (string.IsNullOrEmpty(genre)) return null;
+            switch (genre)
+            {
+                case "Real Time Strategy": return "RTS";
+                case "Hack and Slash/Beat 'em up": return "Hack and Slash";
+                case "Massively Multiplayer": return "MMO";
+                default: return genre;
+            }
+        }
+
         private static string FormatFirstGenre(IEnumerable<Genre> genres)
         {
             if (genres == null) return null;
@@ -1133,19 +1090,6 @@ namespace PlayniteGo
 
             // Abbreviate the chosen genre name using our new helper
             return AbbreviateGenre(genreToDisplay?.Name);
-        }
-
-        // The old logic is now in its own helper method
-        private static string AbbreviateGenre(string genre)
-        {
-            if (string.IsNullOrEmpty(genre)) return null;
-            switch (genre)
-            {
-                case "Real Time Strategy": return "RTS";
-                case "Hack and Slash/Beat 'em up": return "Hack and Slash";
-                case "Massively Multiplayer": return "MMO";
-                default: return genre;
-            }
         }
 
         private static string FormatContributors(IEnumerable<Company> developers, IEnumerable<Company> publishers)
