@@ -181,7 +181,7 @@ namespace PlayniteGo
         // --- NEW: PRE-COMPUTED & PRE-FORMATTED FIELDS FOR THIN CLIENT ---
         public string PlainTextDescription { get; set; }
         public int? ReleaseYear { get; set; }
-        public long? HltbMainStoryInSeconds { get; set; }
+        public ulong? HltbMainStoryInSeconds { get; set; }
         public string DisplayPlatformNames { get; set; }
         public string DisplayFirstGenre { get; set; }
         public string DisplayContributors { get; set; }
@@ -222,7 +222,8 @@ namespace PlayniteGo
         public class GameTimeData
         {
             [SerializationPropertyName("MainStoryAverage")] public ulong MainStoryAverage { get; set; }
-            [SerializationPropertyName("MainExtraAverage")] public ulong MainPlusExtraAverage { get; set; }
+            // --- BUG FIX #1: Corrected the JSON key to match the Swift client ---
+            [SerializationPropertyName("MainPlusExtraAverage")] public ulong MainPlusExtraAverage { get; set; }
             [SerializationPropertyName("CompletionistAverage")] public ulong CompletionistAverage { get; set; }
         }
     }
@@ -277,7 +278,6 @@ namespace PlayniteGo
 
         public override IEnumerable<MainMenuItem> GetMainMenuItems(GetMainMenuItemsArgs args)
         {
-            // ✅ MODIFIED: Simplified the menu to two main actions
             var menuItems = new List<MainMenuItem>
             {
                 new MainMenuItem
@@ -464,18 +464,17 @@ namespace PlayniteGo
 
                 PlayniteApi.Dialogs.ActivateGlobalProgress(args =>
                 {
-                    // --- ✅ FIX: OPTIMIZED HLTB LOADING ---
-                    // Determine which games we need to load HLTB data for.
-                    bool isIncremental = payload.UpdatedGames != null;
-                    var gamesForHltbLookup = isIncremental ? gamesToProcess : PlayniteApi.Database.Games.ToList();
+                    var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
 
-                    args.Text = $"Loading HowLongToBeat data for {gamesForHltbLookup.Count} games...";
+                    // --- HLTB Data Loading ---
+                    args.Text = $"Loading HowLongToBeat data...";
                     args.IsIndeterminate = true;
                     var hltbDataLookup = new Dictionary<Guid, HltbApi.HltbDataItem>();
                     if (!string.IsNullOrEmpty(hltbPath))
                     {
-                        foreach (var game in gamesForHltbLookup)
+                        foreach (var game in allGamesInLibrary)
                         {
+                            if (args.CancelToken.IsCancellationRequested) { return; }
                             string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
                             if (File.Exists(hltbDetailsPath))
                             {
@@ -496,92 +495,36 @@ namespace PlayniteGo
                     }
                     Func<Game, HltbApi.HltbDataItem> getHltbData = (game) => hltbDataLookup.TryGetValue(game.Id, out var data) ? data : null;
 
-                    var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
+                    // --- BUG FIX #2: Refactored stats generation to be complete for all categories ---
                     args.Text = $"Analyzing {allGamesInLibrary.Count} games for stats and filters...";
-                    var playedGames = new List<Game>();
-                    var unplayedGames = new List<Game>();
-                    var sourceCounts = new Dictionary<string, int>();
-                    var completionStatusCounts = new Dictionary<string, int>();
-                    var platformCounts = new Dictionary<string, int>();
-                    var genreCounts = new Dictionary<string, int>();
-                    var developerCounts = new Dictionary<string, int>();
-                    var publisherCounts = new Dictionary<string, int>();
-                    var featureCounts = new Dictionary<string, int>();
-                    var tagCounts = new Dictionary<string, int>();
-                    var seriesCounts = new Dictionary<string, int>();
-                    var ageRatingCounts = new Dictionary<string, int>();
-                    var regionCounts = new Dictionary<string, int>();
-                    var categoryCounts = new Dictionary<string, int>();
+                    var playedGames = allGamesInLibrary.Where(g => g.Playtime > 0).ToList();
+                    var unplayedGames = allGamesInLibrary.Where(g => g.Playtime <= 0).ToList();
+
+                    // --- Lookups for related games, built once from the full library ---
                     var developerLookup = new Dictionary<string, List<Guid>>();
                     var publisherLookup = new Dictionary<string, List<Guid>>();
                     var seriesLookup = new Dictionary<string, List<Guid>>();
-
-                    void IncrementCount(Dictionary<string, int> dict, string key)
-                    {
-                        if (string.IsNullOrEmpty(key)) return;
-                        dict.TryGetValue(key, out int currentCount);
-                        dict[key] = currentCount + 1;
-                    }
-
                     foreach (var game in allGamesInLibrary)
                     {
-                        if (game.Playtime > 0) { playedGames.Add(game); } else { unplayedGames.Add(game); }
-                        if (game.Source != null) IncrementCount(sourceCounts, game.Source.Name);
-                        IncrementCount(completionStatusCounts, game.CompletionStatus?.Name ?? "Not Set");
-                        if (game.Platforms != null) foreach (var p in game.Platforms) IncrementCount(platformCounts, p.Name);
-                        if (game.Genres != null) foreach (var g in game.Genres) IncrementCount(genreCounts, g.Name);
-                        if (game.Developers != null) foreach (var d in game.Developers) { IncrementCount(developerCounts, d.Name); if (!developerLookup.ContainsKey(d.Name)) developerLookup[d.Name] = new List<Guid>(); developerLookup[d.Name].Add(game.Id); }
-                        if (game.Publishers != null) foreach (var p in game.Publishers) { IncrementCount(publisherCounts, p.Name); if (!publisherLookup.ContainsKey(p.Name)) publisherLookup[p.Name] = new List<Guid>(); publisherLookup[p.Name].Add(game.Id); }
-                        if (game.Features != null) foreach (var f in game.Features) IncrementCount(featureCounts, f.Name);
-                        if (game.Tags != null) foreach (var t in game.Tags) IncrementCount(tagCounts, t.Name);
-                        if (game.Series != null) foreach (var s in game.Series) { IncrementCount(seriesCounts, s.Name); if (!seriesLookup.ContainsKey(s.Name)) seriesLookup[s.Name] = new List<Guid>(); seriesLookup[s.Name].Add(game.Id); }
-                        if (game.AgeRatings != null) foreach (var a in game.AgeRatings) IncrementCount(ageRatingCounts, a.Name);
-                        if (game.Regions != null) foreach (var r in game.Regions) IncrementCount(regionCounts, r.Name);
-                        if (game.Categories != null) foreach (var c in game.Categories) IncrementCount(categoryCounts, c.Name);
+                        if (game.Developers != null) foreach (var d in game.Developers) { if (!developerLookup.ContainsKey(d.Name)) developerLookup[d.Name] = new List<Guid>(); developerLookup[d.Name].Add(game.Id); }
+                        if (game.Publishers != null) foreach (var p in game.Publishers) { if (!publisherLookup.ContainsKey(p.Name)) publisherLookup[p.Name] = new List<Guid>(); publisherLookup[p.Name].Add(game.Id); }
+                        if (game.Series != null) foreach (var s in game.Series) { if (!seriesLookup.ContainsKey(s.Name)) seriesLookup[s.Name] = new List<Guid>(); seriesLookup[s.Name].Add(game.Id); }
                     }
 
-                    Func<Dictionary<string, int>, List<CountData>> toCountData = (dict) => dict.Select(kvp => new CountData { Name = kvp.Key, Count = kvp.Value }).OrderByDescending(x => x.Count).ToList();
-
-                    var allGamesStats = calculateSummaryStats(allGamesInLibrary);
-                    allGamesStats.AllSources = toCountData(sourceCounts);
-                    allGamesStats.AllPlatforms = toCountData(platformCounts);
-                    allGamesStats.CompletionStatusCounts = toCountData(completionStatusCounts);
-                    allGamesStats.TopGenres = toCountData(genreCounts).Take(5).ToList();
-                    allGamesStats.TopDevelopers = toCountData(developerCounts).Take(5).ToList();
-                    allGamesStats.TopPublishers = toCountData(publisherCounts).Take(5).ToList();
-                    allGamesStats.TopTags = toCountData(tagCounts).Take(5).ToList();
-                    allGamesStats.TopFeatures = toCountData(featureCounts).Take(5).ToList();
+                    // --- Generate complete stats for each category ---
+                    var allGamesStats = GenerateSummaryStatsForCollection(allGamesInLibrary);
+                    var playedGamesStats = GenerateSummaryStatsForCollection(playedGames);
+                    var unplayedGamesStats = GenerateSummaryStatsForCollection(unplayedGames);
 
                     payload.Stats = new ExportedStats
                     {
                         AllGames = allGamesStats,
-                        PlayedGames = calculateSummaryStats(playedGames),
-                        UnplayedGames = calculateSummaryStats(unplayedGames),
+                        PlayedGames = playedGamesStats,
+                        UnplayedGames = unplayedGamesStats,
                     };
 
-                    // Note: For backlog calculation, we need all HLTB data, so we must load it for all games regardless.
-                    // The optimization above only applies if HLTB data is *only* used within the game loop.
-                    // To fully optimize, we would need to pass all HLTB data into the backlog calculation.
-                    // The current approach is a good compromise. Let's load all HLTB data for backlog calculation.
-                    var allHltbData = new Dictionary<Guid, HltbApi.HltbDataItem>();
-                    if (!string.IsNullOrEmpty(hltbPath))
-                    {
-                        foreach (var game in allGamesInLibrary)
-                        {
-                            string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
-                            if (File.Exists(hltbDetailsPath))
-                            {
-                                try
-                                {
-                                    var data = Serialization.FromJson<HltbApi.HltbData>(File.ReadAllText(hltbDetailsPath));
-                                    if (data?.Items?.FirstOrDefault() is HltbApi.HltbDataItem d) allHltbData[game.Id] = d;
-                                }
-                                catch { }
-                            }
-                        }
-                    }
-
-                    var backlogGames = unplayedGames.Select(g => new { Game = g, Hltb = allHltbData.TryGetValue(g.Id, out var data) ? data : null }).Where(x => x.Hltb?.TimeData?.MainStoryAverage > 0).ToList();
+                    // --- Backlog Calculation ---
+                    var backlogGames = unplayedGames.Select(g => new { Game = g, Hltb = getHltbData(g) }).Where(x => x.Hltb?.TimeData?.MainStoryAverage > 0).ToList();
                     var longestBacklogGame = backlogGames.OrderByDescending(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
                     var shortestBacklogGame = backlogGames.Where(g => g.Hltb.TimeData.MainStoryAverage > 0).OrderBy(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
                     long totalBacklogSeconds = backlogGames.Sum(g => (long)g.Hltb.TimeData.MainStoryAverage);
@@ -595,25 +538,26 @@ namespace PlayniteGo
                         ShortestBacklogGame = shortestBacklogGame == null ? null : new GameTime { Name = shortestBacklogGame.Game.Name, Hours = (int)(shortestBacklogGame.Hltb.TimeData.MainStoryAverage / SecondsInHour) }
                     };
 
+                    // --- Filter Options Calculation (based on All Games) ---
                     payload.FilterOptions = new ExportedFilterOptions
                     {
-                        Sources = sourceCounts.Keys.OrderBy(n => n).ToList(),
-                        CompletionStatuses = completionStatusCounts.Keys.OrderBy(n => n).ToList(),
-                        Platforms = platformCounts.Keys.OrderBy(n => n).ToList(),
-                        Genres = genreCounts.Keys.OrderBy(n => n).ToList(),
-                        Developers = developerCounts.Keys.OrderBy(n => n).ToList(),
-                        Publishers = publisherCounts.Keys.OrderBy(n => n).ToList(),
-                        Features = featureCounts.Keys.OrderBy(n => n).ToList(),
-                        Tags = tagCounts.Keys.OrderBy(n => n).ToList(),
-                        Series = seriesCounts.Keys.OrderBy(n => n).ToList(),
-                        AgeRatings = ageRatingCounts.Keys.OrderBy(n => n).ToList(),
-                        Regions = regionCounts.Keys.OrderBy(n => n).ToList(),
-                        Categories = categoryCounts.Keys.OrderBy(n => n).ToList()
+                        Sources = allGamesStats.AllSources.Select(d => d.Name).OrderBy(n => n).ToList(),
+                        CompletionStatuses = allGamesStats.CompletionStatusCounts.Select(d => d.Name).OrderBy(n => n).ToList(),
+                        Platforms = allGamesStats.AllPlatforms.Select(d => d.Name).OrderBy(n => n).ToList(),
+                        Genres = allGamesInLibrary.SelectMany(g => g.Genres ?? new List<Genre>()).Select(g => g.Name).Distinct().OrderBy(n => n).ToList(),
+                        Developers = allGamesInLibrary.SelectMany(g => g.Developers ?? new List<Company>()).Select(d => d.Name).Distinct().OrderBy(n => n).ToList(),
+                        Publishers = allGamesInLibrary.SelectMany(g => g.Publishers ?? new List<Company>()).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
+                        Features = allGamesInLibrary.SelectMany(g => g.Features ?? new List<GameFeature>()).Select(f => f.Name).Distinct().OrderBy(n => n).ToList(),
+                        Tags = allGamesInLibrary.SelectMany(g => g.Tags ?? new List<Tag>()).Select(t => t.Name).Distinct().OrderBy(n => n).ToList(),
+                        Series = allGamesInLibrary.SelectMany(g => g.Series ?? new List<Series>()).Select(s => s.Name).Distinct().OrderBy(n => n).ToList(),
+                        AgeRatings = allGamesInLibrary.SelectMany(g => g.AgeRatings ?? new List<AgeRating>()).Select(a => a.Name).Distinct().OrderBy(n => n).ToList(),
+                        Regions = allGamesInLibrary.SelectMany(g => g.Regions ?? new List<Region>()).Select(r => r.Name).Distinct().OrderBy(n => n).ToList(),
+                        Categories = allGamesInLibrary.SelectMany(g => g.Categories ?? new List<Category>()).Select(c => c.Name).Distinct().OrderBy(n => n).ToList()
                     };
 
                     ulong maxPlaytimeSeconds = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.Playtime) : 0;
                     ulong maxInstallSizeBytes = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.InstallSize ?? 0) : 0;
-                    var allHltbTimesInSeconds = allHltbData.Values.Select(h => h.TimeData?.MainStoryAverage ?? 0).Where(t => t > 0).ToList();
+                    var allHltbTimesInSeconds = hltbDataLookup.Values.Select(h => h.TimeData?.MainStoryAverage ?? 0).Where(t => t > 0).ToList();
                     ulong maxHltbSeconds = allHltbTimesInSeconds.Any() ? allHltbTimesInSeconds.Max() : 0;
                     var gamesWithReleaseYear = allGamesInLibrary.Where(g => g.ReleaseDate != null).Select(g => g.ReleaseDate.Value.Year).ToList();
 
@@ -628,6 +572,7 @@ namespace PlayniteGo
                     payload.FilterOptions.HltbMainStoryRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxHltbHours) };
                     payload.FilterOptions.ReleaseYearRange = new RangeData { LowerBound = minReleaseYear, UpperBound = maxReleaseYear };
 
+                    // --- Game Data Processing ---
                     args.ProgressMaxValue = gamesToProcess.Count;
                     args.IsIndeterminate = false;
                     var processedGames = new ConcurrentBag<GameExport>();
@@ -733,7 +678,7 @@ namespace PlayniteGo
 
             gameExport.PlainTextDescription = StripHtml(game.Description);
             gameExport.ReleaseYear = game.ReleaseDate?.Year;
-            gameExport.HltbMainStoryInSeconds = (long?)(hltbData?.TimeData?.MainStoryAverage);
+            gameExport.HltbMainStoryInSeconds = hltbData?.TimeData?.MainStoryAverage;
             gameExport.DisplayPlatformNames = FormatPlatformNames(game.Platforms);
             gameExport.DisplayFirstGenre = FormatFirstGenre(game.Genres);
             gameExport.DisplayContributors = FormatContributors(game.Developers, game.Publishers);
@@ -918,10 +863,29 @@ namespace PlayniteGo
             }
         }
 
-        private SummaryStats calculateSummaryStats(List<Game> games)
+        // --- BUG FIX #2 (REFACTOR): New helper method to generate complete stats for any game collection ---
+        private SummaryStats GenerateSummaryStatsForCollection(List<Game> games)
         {
-            if (!games.Any()) return new SummaryStats { TotalGames = 0 };
+            if (games == null || !games.Any()) return new SummaryStats { TotalGames = 0, GamesPlayedCount = 0, TotalPlaytimeHours = 0 };
 
+            // --- Dictionaries for counting categories ---
+            var sourceCounts = new Dictionary<string, int>();
+            var completionStatusCounts = new Dictionary<string, int>();
+            var platformCounts = new Dictionary<string, int>();
+            var genreCounts = new Dictionary<string, int>();
+            var developerCounts = new Dictionary<string, int>();
+            var publisherCounts = new Dictionary<string, int>();
+            var featureCounts = new Dictionary<string, int>();
+            var tagCounts = new Dictionary<string, int>();
+
+            void IncrementCount(Dictionary<string, int> dict, string key)
+            {
+                if (string.IsNullOrEmpty(key)) return;
+                dict.TryGetValue(key, out int currentCount);
+                dict[key] = currentCount + 1;
+            }
+
+            // --- High/Low trackers ---
             long totalPlaytimeSeconds = 0;
             Game mostPlayed = null;
             Game leastPlayed = null;
@@ -930,39 +894,49 @@ namespace PlayniteGo
             Game oldestAdded = null;
             Game newestAdded = null;
 
+            // --- Single loop to gather all data ---
             foreach (var game in games)
             {
+                // Basic stats
                 totalPlaytimeSeconds += (long)game.Playtime;
-
                 if (game.Playtime > 0)
                 {
                     if (mostPlayed == null || game.Playtime > mostPlayed.Playtime) mostPlayed = game;
                     if (leastPlayed == null || game.Playtime < leastPlayed.Playtime) leastPlayed = game;
                 }
-
                 if (game.ReleaseDate != null)
                 {
                     if (oldestRelease == null || game.ReleaseDate.Value.CompareTo(oldestRelease.ReleaseDate.Value) < 0) oldestRelease = game;
                     if (newestRelease == null || game.ReleaseDate.Value.CompareTo(newestRelease.ReleaseDate.Value) > 0) newestRelease = game;
                 }
-
                 if (game.Added != null)
                 {
                     if (oldestAdded == null || game.Added.Value < oldestAdded.Added.Value) oldestAdded = game;
                     if (newestAdded == null || game.Added.Value > newestAdded.Added.Value) newestAdded = game;
                 }
+
+                // Category counts
+                if (game.Source != null) IncrementCount(sourceCounts, game.Source.Name);
+                IncrementCount(completionStatusCounts, game.CompletionStatus?.Name ?? "Not Set");
+                if (game.Platforms != null) foreach (var p in game.Platforms) IncrementCount(platformCounts, p.Name);
+                if (game.Genres != null) foreach (var g in game.Genres) IncrementCount(genreCounts, g.Name);
+                if (game.Developers != null) foreach (var d in game.Developers) IncrementCount(developerCounts, d.Name);
+                if (game.Publishers != null) foreach (var p in game.Publishers) IncrementCount(publisherCounts, p.Name);
+                if (game.Features != null) foreach (var f in game.Features) IncrementCount(featureCounts, f.Name);
+                if (game.Tags != null) foreach (var t in game.Tags) IncrementCount(tagCounts, t.Name);
             }
 
-            var playedGamesStats = games.Where(g => g.Playtime > 0).ToList();
+            Func<Dictionary<string, int>, List<CountData>> toCountData = (dict) => dict.Select(kvp => new CountData { Name = kvp.Key, Count = kvp.Value }).OrderByDescending(x => x.Count).ToList();
 
             return new SummaryStats
             {
                 TotalGames = games.Count,
-                GamesPlayedCount = playedGamesStats.Count,
+                GamesPlayedCount = games.Count(g => g.Playtime > 0),
                 TotalPlaytimeHours = (int)(totalPlaytimeSeconds / SecondsInHour),
                 MostPlayedGame = mostPlayed == null ? null : new GameTime { Name = mostPlayed.Name, Hours = (int)(mostPlayed.Playtime / SecondsInHour) },
                 LeastPlayedGame = leastPlayed == null ? null : new GameTime { Name = leastPlayed.Name, Hours = (int)(leastPlayed.Playtime / SecondsInHour) },
-                GamesByDecade = games.Where(g => g.ReleaseDate != null).GroupBy(g => (g.ReleaseDate.Value.Year / 10) * 10).Select(g => new CountData { Name = $"{g.Key}s", Count = g.Count() }).OrderBy(x => x.Name).ToList(),
+
+                // Highs & Lows
                 TopCriticRated = games.Where(g => g.CriticScore != null && g.CriticScore > 0).OrderByDescending(g => g.CriticScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CriticScore.Value }).ToList(),
                 BottomCriticRated = games.Where(g => g.CriticScore != null && g.CriticScore > 0).OrderBy(g => g.CriticScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CriticScore.Value }).ToList(),
                 TopCommunityRated = games.Where(g => g.CommunityScore != null && g.CommunityScore > 0).OrderByDescending(g => g.CommunityScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CommunityScore.Value }).ToList(),
@@ -972,7 +946,18 @@ namespace PlayniteGo
                 OldestRelease = oldestRelease == null ? null : new GameScore { Name = oldestRelease.Name, Score = oldestRelease.ReleaseDate.Value.Year },
                 NewestRelease = newestRelease == null ? null : new GameScore { Name = newestRelease.Name, Score = newestRelease.ReleaseDate.Value.Year },
                 OldestAdded = oldestAdded == null ? null : new GameScore { Name = oldestAdded.Name, Score = oldestAdded.Added.Value.Year },
-                NewestAdded = newestAdded == null ? null : new GameScore { Name = newestAdded.Name, Score = newestAdded.Added.Value.Year }
+                NewestAdded = newestAdded == null ? null : new GameScore { Name = newestAdded.Name, Score = newestAdded.Added.Value.Year },
+
+                // Count Data
+                GamesByDecade = games.Where(g => g.ReleaseDate != null).GroupBy(g => (g.ReleaseDate.Value.Year / 10) * 10).Select(g => new CountData { Name = $"{g.Key}s", Count = g.Count() }).OrderBy(x => x.Name).ToList(),
+                AllSources = toCountData(sourceCounts),
+                AllPlatforms = toCountData(platformCounts),
+                CompletionStatusCounts = toCountData(completionStatusCounts),
+                TopGenres = toCountData(genreCounts).Take(5).ToList(),
+                TopDevelopers = toCountData(developerCounts).Take(5).ToList(),
+                TopPublishers = toCountData(publisherCounts).Take(5).ToList(),
+                TopTags = toCountData(tagCounts).Take(5).ToList(),
+                TopFeatures = toCountData(featureCounts).Take(5).ToList()
             };
         }
 
@@ -1081,14 +1066,8 @@ namespace PlayniteGo
             var genreList = genres.ToList();
             if (!genreList.Any()) return null;
 
-            // Find the first genre that is NOT "2D" or "3D"
             var bestGenre = genreList.FirstOrDefault(g => g.Name != "2D" && g.Name != "3D");
-
-            // If a better genre was found, use it. If not (meaning the only genres are "2D" or "3D"),
-            // just use the very first one from the original list so something is always displayed.
             var genreToDisplay = bestGenre ?? genreList.FirstOrDefault();
-
-            // Abbreviate the chosen genre name using our new helper
             return AbbreviateGenre(genreToDisplay?.Name);
         }
 
