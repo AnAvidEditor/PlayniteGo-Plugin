@@ -594,7 +594,8 @@ namespace PlayniteGo
                     if (payload.UpdatedGames != null) payload.UpdatedGames = processedGames.OrderBy(g => g.Name).ToList();
 
                     var jsonContent = Serialization.ToJson(payload, true);
-                    File.WriteAllText(Path.Combine(tempDir, "library.json"), jsonContent);
+                    var obfuscatedContent = ObfuscateJson(jsonContent);
+                    File.WriteAllText(Path.Combine(tempDir, "library.json"), obfuscatedContent);
 
                     if (args.CancelToken.IsCancellationRequested) return;
 
@@ -1106,6 +1107,25 @@ namespace PlayniteGo
         private static string FormatShortDate(DateTime? date)
         {
             return date?.ToString("d", CultureInfo.CurrentCulture);
+        }
+
+        private string ObfuscateJson(string json)
+        {
+            // 1. Convert the JSON string to a byte array
+            var bytes = Encoding.UTF8.GetBytes(json);
+
+            // 2. Compress the byte array using an in-memory Gzip stream
+            using (var outputStream = new MemoryStream())
+            {
+                using (var gzipStream = new GZipStream(outputStream, CompressionMode.Compress))
+                {
+                    gzipStream.Write(bytes, 0, bytes.Length);
+                }
+                var compressedBytes = outputStream.ToArray();
+
+                // 3. Convert the compressed binary data to a Base64 string and return it
+                return Convert.ToBase64String(compressedBytes);
+            }
         }
 
         private string GenerateDiagnosticReport()
