@@ -1,5 +1,4 @@
-﻿// START: D:\Visual Studio Projects\PlayniteGo\PlayniteGoSettingsViewModel.cs 
-using Playnite.SDK;
+﻿using Playnite.SDK;
 using Playnite.SDK.Data;
 using System;
 using System.Collections.Generic;
@@ -94,12 +93,11 @@ namespace PlayniteGo
             }
         }
 
-
-        public PlayniteGoSettingsViewModel(PlayniteGo plugin)
+        // --- THIS CONSTRUCTOR IS THE ONLY PART THAT HAS CHANGED ---
+        public PlayniteGoSettingsViewModel(PlayniteGo plugin, PlayniteGoSettings settings)
         {
             this.plugin = plugin;
-            var savedSettings = plugin.LoadPluginSettings<PlayniteGoSettings>();
-            Settings = savedSettings ?? new PlayniteGoSettings();
+            this.Settings = settings;
 
             string hltbBasePath = GetAutoDetectedPath("HowLongToBeat", PlayniteGo.hltbPluginId);
             if (!string.IsNullOrEmpty(hltbBasePath) && Directory.Exists(hltbBasePath))
