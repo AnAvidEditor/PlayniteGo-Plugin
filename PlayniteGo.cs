@@ -272,7 +272,21 @@ namespace PlayniteGo
 
         public PlayniteGo(IPlayniteAPI api) : base(api)
         {
+            // This is the important part: it loads saved settings OR creates new ones.
             settings = new PlayniteGoSettingsViewModel(this);
+
+            var savedSettings = LoadPluginSettings<PlayniteGoSettings>();
+            if (savedSettings != null)
+            {
+                settings.Settings = savedSettings;
+            }
+            else
+            {
+                settings.Settings = new PlayniteGoSettings();
+                // The first time the plugin runs, this saves the default settings.
+                SavePluginSettings(settings.Settings);
+            }
+
             Properties = new GenericPluginProperties { HasSettings = true };
         }
 

@@ -175,4 +175,3 @@ namespace PlayniteGo
         }
     }
 }
-// END: D:\Visual Studio Projects\PlayniteGo\PlayniteGoSettingsViewModel.cs

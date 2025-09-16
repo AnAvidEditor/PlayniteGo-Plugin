@@ -1,8 +1,27 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Obfuscator>
-	<Var name="InPath" value="." />
-	<Var name="OutPath" value=".\Obfuscator_Output" />
-	<Var name="KeepPublicApi" value="true" />
+	<Var name="InPath" value="D:\Visual Studio Projects\PlayniteGo\bin\Release" />
+	<Var name="OutPath" value="$(InPath)\obfuscated" />
+
+	<Var name="KeepPublicApi" value="false" />
 	<Var name="HidePrivateApi" value="true" />
+	<Var name="RenameProperties" value="true" />
+
 	<Module file="$(InPath)\PlayniteGo.dll" />
+
+	<SkipType name="PlayniteGo.PlayniteGo" />
+	<SkipType name="PlayniteGo.TimeData" />
+	<SkipType name="PlayniteGo.ExportPayload" />
+	<SkipType name="PlayniteGo.ExportedStats" />
+	<SkipType name="PlayniteGo.SummaryStats" />
+	<SkipType name="PlayniteGo.BacklogStats" />
+	<SkipType name="PlayniteGo.RangeData" />
+	<SkipType name="PlayniteGo.ExportedFilterOptions" />
+	<SkipType name="PlayniteGo.CountData" />
+	<SkipType name="PlayniteGo.GameScore" />
+	<SkipType name="PlayniteGo.GameTime" />
+	<SkipType name="PlayniteGo.GameExport" />
+	<SkipType name="PlayniteGo.LinkExport" />
+	<SkipType name="PlayniteGo.HltbApi.*" />
+	<SkipType name="Playnite.SDK.*" />
 </Obfuscator>
