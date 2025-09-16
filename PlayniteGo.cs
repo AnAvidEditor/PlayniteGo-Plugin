@@ -272,22 +272,18 @@ namespace PlayniteGo
 
         public PlayniteGo(IPlayniteAPI api) : base(api)
         {
-            // This is the important part: it loads saved settings OR creates new ones.
-            settings = new PlayniteGoSettingsViewModel(this, savedSettings);
+            Properties = new GenericPluginProperties
+            {
+                HasSettings = true
+            };
 
             var savedSettings = LoadPluginSettings<PlayniteGoSettings>();
-            if (savedSettings != null)
+            if (savedSettings == null)
             {
-                settings.Settings = savedSettings;
-            }
-            else
-            {
-                settings.Settings = new PlayniteGoSettings();
-                // The first time the plugin runs, this saves the default settings.
-                SavePluginSettings(settings.Settings);
+                savedSettings = new PlayniteGoSettings();
             }
 
-            Properties = new GenericPluginProperties { HasSettings = true };
+            settings = new PlayniteGoSettingsViewModel(this, savedSettings);
         }
 
         public override IEnumerable<MainMenuItem> GetMainMenuItems(GetMainMenuItemsArgs args)
@@ -1248,10 +1244,25 @@ namespace PlayniteGo
             return sb.ToString();
         }
 
-        public override ISettings GetSettings(bool firstRunSettings) => settings;
+        public override ISettings GetSettings(bool firstRunSettings)
+        {
+            // On first run, this ensures the default object is saved.
+            // On subsequent runs, it loads the saved settings for editing.
+            var savedSettings = LoadPluginSettings<PlayniteGoSettings>();
+            if (savedSettings == null)
+            {
+                savedSettings = new PlayniteGoSettings();
+            }
+
+            // This is a common pattern to pass a clone for editing.
+            settings.BeginEdit(savedSettings);
+            return settings;
+        }
 
         public override UserControl GetSettingsView(bool firstRunSettings)
         {
+            // This passes the viewmodel (which holds all the settings data)
+            // to the view, allowing the XAML bindings to work.
             return new PlayniteGoSettingsView(settings);
         }
     }

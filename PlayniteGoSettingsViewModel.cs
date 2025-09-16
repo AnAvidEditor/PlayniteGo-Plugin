@@ -93,7 +93,7 @@ namespace PlayniteGo
             }
         }
 
-        // --- THIS CONSTRUCTOR IS THE ONLY PART THAT HAS CHANGED ---
+
         public PlayniteGoSettingsViewModel(PlayniteGo plugin, PlayniteGoSettings settings)
         {
             this.plugin = plugin;
@@ -133,6 +133,13 @@ namespace PlayniteGo
             }
 
             return null;
+        }
+
+        // --- THIS NEW METHOD IS THE KEY CHANGE ---
+        public void BeginEdit(PlayniteGoSettings settingsToEdit)
+        {
+            Settings = settingsToEdit;
+            editingClone = Serialization.GetClone(Settings);
         }
 
         public void BeginEdit()
