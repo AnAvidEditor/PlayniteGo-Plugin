@@ -245,7 +245,7 @@ namespace PlayniteGo
         }
 
         private static readonly ILogger logger = LogManager.GetLogger();
-        private PlayniteGoSettingsViewModel settings { get; set; }
+        private PlayniteGoSettingsViewModel settings;
         public override Guid Id { get; } = Guid.Parse("af7bd5e5-0ae0-4276-bb2a-cdf7fadea92e");
         private const string exportedIdsFileName = "exportedGameIds.json";
         private const string stateFileName = "exportState.json";
@@ -277,13 +277,8 @@ namespace PlayniteGo
                 HasSettings = true
             };
 
-            var savedSettings = LoadPluginSettings<PlayniteGoSettings>();
-            if (savedSettings == null)
-            {
-                savedSettings = new PlayniteGoSettings();
-            }
-
-            settings = new PlayniteGoSettingsViewModel(this, savedSettings);
+            // This single line creates the ViewModel, which in turn handles creating and loading the settings.
+            settings = new PlayniteGoSettingsViewModel(this);
         }
 
         public override IEnumerable<MainMenuItem> GetMainMenuItems(GetMainMenuItemsArgs args)
@@ -1246,24 +1241,11 @@ namespace PlayniteGo
 
         public override ISettings GetSettings(bool firstRunSettings)
         {
-            // On first run, this ensures the default object is saved.
-            // On subsequent runs, it loads the saved settings for editing.
-            var savedSettings = LoadPluginSettings<PlayniteGoSettings>();
-            if (savedSettings == null)
-            {
-                savedSettings = new PlayniteGoSettings();
-            }
-
-            // This is a common pattern to pass a clone for editing.
-            settings.BeginEdit(savedSettings);
             return settings;
         }
-
         public override UserControl GetSettingsView(bool firstRunSettings)
         {
-            // This passes the viewmodel (which holds all the settings data)
-            // to the view, allowing the XAML bindings to work.
-            return new PlayniteGoSettingsView(settings);
+            return new PlayniteGoSettingsView();
         }
     }
 }

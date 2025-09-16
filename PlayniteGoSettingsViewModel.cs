@@ -1,10 +1,10 @@
 ﻿using Playnite.SDK;
 using Playnite.SDK.Data;
+using Playnite.SDK.Plugins;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Playnite.SDK.Plugins;
 
 namespace PlayniteGo
 {
@@ -12,93 +12,20 @@ namespace PlayniteGo
     {
         private readonly PlayniteGo plugin;
         private PlayniteGoSettings settings;
-        public PlayniteGoSettings Settings
-        {
-            get => settings;
-            set
-            {
-                settings = value;
-                OnPropertyChanged();
-            }
-        }
+        public PlayniteGoSettings Settings { get => settings; set => SetValue(ref settings, value); }
 
         private PlayniteGoSettings editingClone;
 
-        // Properties for Data Binding in the View
+        // UI-related properties
         public string AutoDetectedHltbPath { get; private set; }
         public List<string> ImageExportFormatOptions { get; } = new List<string> { "WebP", "JPEG", "Copy Original" };
 
-        public string ImageExportFormat
-        {
-            get => Settings.ImageExportFormat;
-            set
-            {
-                if (settings.ImageExportFormat != value)
-                {
-                    Settings.ImageExportFormat = value;
-                    OnPropertyChanged();
-                }
-            }
-        }
-
-        public int ImageQuality
-        {
-            get => Settings.ImageQuality;
-            set
-            {
-                if (settings.ImageQuality != value)
-                {
-                    Settings.ImageQuality = value;
-                    OnPropertyChanged();
-                }
-            }
-        }
-
-        public int CoverWidth
-        {
-            get => Settings.CoverWidth;
-            set
-            {
-                if (settings.CoverWidth != value)
-                {
-                    Settings.CoverWidth = value;
-                    OnPropertyChanged();
-                }
-            }
-        }
-
-        public int BackgroundWidth
-        {
-            get => Settings.BackgroundWidth;
-            set
-            {
-                if (settings.BackgroundWidth != value)
-                {
-                    Settings.BackgroundWidth = value;
-                    OnPropertyChanged();
-                }
-            }
-        }
-
-        public string DebugMessage
-        {
-            get => Settings.DebugMessage;
-            set
-            {
-                if (settings.DebugMessage != value)
-                {
-                    Settings.DebugMessage = value;
-                    OnPropertyChanged();
-                }
-            }
-        }
-
-
-        public PlayniteGoSettingsViewModel(PlayniteGo plugin, PlayniteGoSettings settings)
+        public PlayniteGoSettingsViewModel(PlayniteGo plugin)
         {
             this.plugin = plugin;
-            this.Settings = settings;
+            this.settings = new PlayniteGoSettings(plugin);
 
+            // Path detection logic
             string hltbBasePath = GetAutoDetectedPath("HowLongToBeat", PlayniteGo.hltbPluginId);
             if (!string.IsNullOrEmpty(hltbBasePath) && Directory.Exists(hltbBasePath))
             {
@@ -135,16 +62,10 @@ namespace PlayniteGo
             return null;
         }
 
-        // --- THIS NEW METHOD IS THE KEY CHANGE ---
-        public void BeginEdit(PlayniteGoSettings settingsToEdit)
-        {
-            Settings = settingsToEdit;
-            editingClone = Serialization.GetClone(Settings);
-        }
-
+        // ISettings implementation
         public void BeginEdit()
         {
-            editingClone = Serialization.GetClone(Settings);
+            editingClone = Serialization.GetClone(settings);
         }
 
         public void CancelEdit()

@@ -4,12 +4,9 @@ namespace PlayniteGo
 {
     public partial class PlayniteGoSettingsView : UserControl
     {
-        // The constructor now accepts the view model as an argument.
-        public PlayniteGoSettingsView(PlayniteGoSettingsViewModel viewModel)
+        public PlayniteGoSettingsView()
         {
             InitializeComponent();
-            // Explicitly setting the DataContext ensures the bindings in the XAML will work.
-            DataContext = viewModel;
         }
     }
 }
