@@ -8,24 +8,27 @@
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Margin="20">
+
             <TextBlock Text="Export Settings" FontWeight="Bold" Margin="0,0,0,10"/>
-            <TextBlock Text="{Binding Settings.DebugMessage}" Margin="0,0,0,10" Foreground="Red"/>
 
             <TextBlock Text="Image Format" Margin="0,10,0,5" FontWeight="SemiBold"/>
             <TextBlock TextWrapping="Wrap" Margin="0,0,0,5" FontStyle="Italic" Foreground="Gray">
-                WebP offers the best compression. JPEG is for maximum compatibility. "Copy Original" is fastest but results in larger file sizes.
+                WebP offers the best compression.
+ JPEG is for maximum compatibility. "Copy Original" is fastest but results in larger file sizes.
             </TextBlock>
             <ComboBox ItemsSource="{Binding ImageExportFormatOptions}" SelectedItem="{Binding Settings.ImageExportFormat}" />
 
             <TextBlock Text="Image Quality" Margin="0,15,0,5" FontWeight="SemiBold"/>
             <TextBlock TextWrapping="Wrap" Margin="0,0,0,5" FontStyle="Italic" Foreground="Gray">
-                Applies to WebP and JPEG formats. 80 is a good balance of quality and size.
+                Applies to WebP and JPEG formats.
+ 80 is a good balance of quality and size.
             </TextBlock>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+
 
                 <Slider Grid.Column="0" VerticalAlignment="Center" Minimum="1" Maximum="100" Value="{Binding Settings.ImageQuality}" IsSnapToTickEnabled="True" TickFrequency="1" />
                 <TextBox Grid.Column="1" Text="{Binding Settings.ImageQuality, UpdateSourceTrigger=PropertyChanged}" Width="40" Margin="10,0,0,0" />
@@ -34,6 +37,7 @@
             <TextBlock Text="Max Cover Image Width (pixels)" Margin="0,15,0,5" FontWeight="SemiBold"/>
             <TextBox Text="{Binding Settings.CoverWidth, UpdateSourceTrigger=PropertyChanged}" />
 
+
             <TextBlock Text="Max Background Image Width (pixels)" Margin="0,15,0,5" FontWeight="SemiBold"/>
             <TextBox Text="{Binding Settings.BackgroundWidth, UpdateSourceTrigger=PropertyChanged}" />
 
@@ -41,11 +45,13 @@
 
             <TextBlock Text="Plugin Folder Paths" FontWeight="Bold" Margin="0,0,0,10"/>
             <TextBlock TextWrapping="Wrap" Margin="0,0,0,10">
-                This plugin reads data from other extensions. It will try to find them automatically.
+                This plugin reads data from other extensions.
+ It will try to find them automatically.
             </TextBlock>
 
             <TextBlock Text="HowLongToBeat Folder Path" Margin="0,10,0,5" FontWeight="SemiBold"/>
-            <TextBlock Text="The plugin will automatically detect the data path for the HowLongToBeat extension. Please ensure it is installed." TextWrapping="Wrap" Margin="0,0,0,5" />
+            <TextBlock Text="The plugin will automatically detect the data path for the HowLongToBeat extension. Please ensure it is installed."
+ TextWrapping="Wrap" Margin="0,0,0,5" />
             <TextBlock Text="Detected Path:" Margin="0,5,0,2"/>
             <TextBlock Text="{Binding AutoDetectedHltbPath}" FontStyle="Italic" Foreground="Gray" TextWrapping="Wrap" />
         </StackPanel>

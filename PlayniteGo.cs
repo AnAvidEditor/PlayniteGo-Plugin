@@ -251,7 +251,6 @@ namespace PlayniteGo
         private const string stateFileName = "exportState.json";
         private enum ImageType { Cover, Background }
 
-        public static Guid steamPluginId = Guid.Parse("cb91dfc9-b977-43bf-8e70-55f46e410fab");
         public static Guid hltbPluginId = Guid.Parse("e08cd51f-9c9a-4ee3-a094-fde03b55492f");
 
         private const double SecondsInHour = 3600.0;

@@ -17,32 +17,15 @@ namespace PlayniteGo
         private PlayniteGoSettings editingClone;
 
         // UI-related properties
-        public string AutoDetectedHltbPath { get; private set; }
+        private string autoDetectedHltbPath;
+        public string AutoDetectedHltbPath { get => autoDetectedHltbPath; set => SetValue(ref autoDetectedHltbPath, value); }
         public List<string> ImageExportFormatOptions { get; } = new List<string> { "WebP", "JPEG", "Copy Original" };
 
         public PlayniteGoSettingsViewModel(PlayniteGo plugin)
         {
             this.plugin = plugin;
             this.settings = new PlayniteGoSettings(plugin);
-
-            // Path detection logic
-            string hltbBasePath = GetAutoDetectedPath("HowLongToBeat", PlayniteGo.hltbPluginId);
-            if (!string.IsNullOrEmpty(hltbBasePath) && Directory.Exists(hltbBasePath))
-            {
-                string potentialSubfolderPath = Path.Combine(hltbBasePath, "HowLongToBeat");
-                if (Directory.Exists(potentialSubfolderPath))
-                {
-                    AutoDetectedHltbPath = potentialSubfolderPath;
-                }
-                else
-                {
-                    AutoDetectedHltbPath = hltbBasePath;
-                }
-            }
-            else
-            {
-                AutoDetectedHltbPath = "HowLongToBeat plugin not found or path not configured.";
-            }
+            // Path detection logic is now moved to BeginEdit()
         }
 
         private string GetAutoDetectedPath(string pluginName, Guid pluginId)
@@ -66,6 +49,26 @@ namespace PlayniteGo
         public void BeginEdit()
         {
             editingClone = Serialization.GetClone(settings);
+
+            // Path detection logic
+            string hltbBasePath = GetAutoDetectedPath("HowLongToBeat", PlayniteGo.hltbPluginId);
+
+            if (!string.IsNullOrEmpty(hltbBasePath) && Directory.Exists(hltbBasePath))
+            {
+                string potentialSubfolderPath = Path.Combine(hltbBasePath, "HowLongToBeat");
+                if (Directory.Exists(potentialSubfolderPath))
+                {
+                    AutoDetectedHltbPath = potentialSubfolderPath;
+                }
+                else
+                {
+                    AutoDetectedHltbPath = hltbBasePath;
+                }
+            }
+            else
+            {
+                AutoDetectedHltbPath = "HowLongToBeat plugin not found or path not configured.";
+            }
         }
 
         public void CancelEdit()
