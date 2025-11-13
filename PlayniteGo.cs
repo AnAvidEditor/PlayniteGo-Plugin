@@ -762,12 +762,6 @@ namespace PlayniteGo
             hltbPath = GetEffectivePath(hltbPluginId);
             hltbFound = !string.IsNullOrEmpty(hltbPath);
 
-            if (!hltbFound)
-            {
-                PlayniteApi.Dialogs.ShowMessage("Could not determine the path for the HowLongToBeat plugin data. Please ensure the plugin is installed.", "PlayniteGo");
-                return false;
-            }
-
             return true;
         }
 
