@@ -17,8 +17,6 @@ namespace PlayniteGo
         private PlayniteGoSettings editingClone;
 
         // UI-related properties
-        private string autoDetectedHltbPath;
-        public string AutoDetectedHltbPath { get => autoDetectedHltbPath; set => SetValue(ref autoDetectedHltbPath, value); }
         public List<string> ImageExportFormatOptions { get; } = new List<string> { "WebP", "JPEG", "Copy Original" };
 
         public PlayniteGoSettingsViewModel(PlayniteGo plugin)
@@ -28,47 +26,10 @@ namespace PlayniteGo
             // Path detection logic is now moved to BeginEdit()
         }
 
-        private string GetAutoDetectedPath(string pluginName, Guid pluginId)
-        {
-            var foundPlugin = plugin.PlayniteApi.Addons.Plugins.FirstOrDefault(p => p.Id == pluginId);
-            if (foundPlugin == null)
-            {
-                return null;
-            }
-
-            var path = foundPlugin.GetPluginUserDataPath();
-            if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
-            {
-                return path;
-            }
-
-            return null;
-        }
-
         // ISettings implementation
         public void BeginEdit()
         {
             editingClone = Serialization.GetClone(settings);
-
-            // Path detection logic
-            string hltbBasePath = GetAutoDetectedPath("HowLongToBeat", PlayniteGo.hltbPluginId);
-
-            if (!string.IsNullOrEmpty(hltbBasePath) && Directory.Exists(hltbBasePath))
-            {
-                string potentialSubfolderPath = Path.Combine(hltbBasePath, "HowLongToBeat");
-                if (Directory.Exists(potentialSubfolderPath))
-                {
-                    AutoDetectedHltbPath = potentialSubfolderPath;
-                }
-                else
-                {
-                    AutoDetectedHltbPath = hltbBasePath;
-                }
-            }
-            else
-            {
-                AutoDetectedHltbPath = "HowLongToBeat plugin not found or path not configured.";
-            }
         }
 
         public void CancelEdit()

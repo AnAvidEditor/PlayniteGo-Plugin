@@ -116,7 +116,6 @@ namespace PlayniteGo
         public RangeData PlaytimeRange { get; set; }
         public RangeData ReleaseYearRange { get; set; }
         public RangeData InstallSizeRange { get; set; }
-        public RangeData HltbMainStoryRange { get; set; }
     }
 
     public class CountData
@@ -160,7 +159,6 @@ namespace PlayniteGo
         public int? UserScore { get; set; }
         public string Notes { get; set; }
         public ulong? InstallSize { get; set; }
-        public HltbApi.HltbDataItem HowLongToBeatData { get; set; }
 
         // --- CORE RELATIONSHIPS (RAW DATA) ---
         public List<string> Platforms { get; set; }
@@ -181,12 +179,10 @@ namespace PlayniteGo
         // --- NEW: PRE-COMPUTED & PRE-FORMATTED FIELDS FOR THIN CLIENT ---
         public string PlainTextDescription { get; set; }
         public int? ReleaseYear { get; set; }
-        public ulong? HltbMainStoryInSeconds { get; set; }
         public string DisplayPlatformNames { get; set; }
         public string DisplayFirstGenre { get; set; }
         public string DisplayContributors { get; set; }
         public string DisplayPlaytime { get; set; }
-        public string DisplayHltbMain { get; set; }
         public string DisplayInstallSize { get; set; }
         public string DisplayAddedDate { get; set; }
         public string DisplayLastPlayed { get; set; }
@@ -201,31 +197,6 @@ namespace PlayniteGo
     {
         public string Name { get; set; }
         public string Url { get; set; }
-    }
-
-    namespace HltbApi
-    {
-        public class HltbData
-        {
-            public List<HltbDataItem> Items { get; set; }
-        }
-
-        public class HltbDataItem
-        {
-            public string Name { get; set; }
-            public int Id { get; set; }
-            [SerializationPropertyName("UrlImg")] public string GameImage { get; set; }
-            public string Url { get; set; }
-            [SerializationPropertyName("GameHltbData")] public GameTimeData TimeData { get; set; }
-        }
-
-        public class GameTimeData
-        {
-            [SerializationPropertyName("MainStoryAverage")] public ulong MainStoryAverage { get; set; }
-            // --- BUG FIX #1: Corrected the JSON key to match the Swift client ---
-            [SerializationPropertyName("MainPlusExtraAverage")] public ulong MainPlusExtraAverage { get; set; }
-            [SerializationPropertyName("CompletionistAverage")] public ulong CompletionistAverage { get; set; }
-        }
     }
 
 
@@ -251,7 +222,6 @@ namespace PlayniteGo
         private const string stateFileName = "exportState.json";
         private enum ImageType { Cover, Background }
 
-        public static Guid hltbPluginId = Guid.Parse("e08cd51f-9c9a-4ee3-a094-fde03b55492f");
 
         private const double SecondsInHour = 3600.0;
         private const double BytesInGigabyte = 1073741824.0;
@@ -335,8 +305,6 @@ namespace PlayniteGo
         {
             try
             {
-                if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
-
                 var allGames = PlayniteApi.Database.Games.ToList();
                 if (!allGames.Any())
                 {
@@ -347,7 +315,7 @@ namespace PlayniteGo
                 var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
                 if (string.IsNullOrEmpty(result)) return;
 
-                ExecuteFullExport(allGames, result, hltbPath, "Full library export...");
+                ExecuteFullExport(allGames, result, "Full library export...");
             }
             catch (Exception ex)
             {
@@ -360,8 +328,6 @@ namespace PlayniteGo
         {
             try
             {
-                if (!CheckPrerequisites(out string hltbPath, out bool hltbFound)) return;
-
                 var lastExportDate = LoadLastExportDate();
                 if (lastExportDate == DateTime.MinValue)
                 {
@@ -386,7 +352,7 @@ namespace PlayniteGo
                 var result = PlayniteApi.Dialogs.SaveFile("Zip Files (*.zip)|*.zip");
                 if (string.IsNullOrEmpty(result)) return;
 
-                ExecuteIncrementalExport(gamesToUpdate, deletedGameIds, result, hltbPath, "Syncing library changes...");
+                ExecuteIncrementalExport(gamesToUpdate, deletedGameIds, result, "Syncing library changes...");
             }
             catch (Exception ex)
             {
@@ -395,20 +361,20 @@ namespace PlayniteGo
             }
         }
 
-        private void ExecuteFullExport(List<Game> gamesToProcess, string exportZipPath, string hltbPath, string progressMessage)
+        private void ExecuteFullExport(List<Game> gamesToProcess, string exportZipPath, string progressMessage)
         {
             var allGameIds = Enumerable.ToHashSet(gamesToProcess.Select(g => g.Id));
             var payload = new ExportPayload { Games = new List<GameExport>() };
             var exportDate = DateTime.UtcNow;
 
-            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, allGameIds, hltbPath, progressMessage, exportDate);
+            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, allGameIds, progressMessage, exportDate);
             if (success)
             {
                 PlayniteApi.Dialogs.ShowMessage($"Successfully exported {payload.Games.Count} games.", "Export Complete");
             }
         }
 
-        private void ExecuteIncrementalExport(List<Game> gamesToProcess, List<Guid> deletedGameIds, string exportZipPath, string hltbPath, string progressMessage)
+        private void ExecuteIncrementalExport(List<Game> gamesToProcess, List<Guid> deletedGameIds, string exportZipPath, string progressMessage)
         {
             var currentIds = Enumerable.ToHashSet(PlayniteApi.Database.Games.Select(g => g.Id));
             var payload = new ExportPayload
@@ -418,14 +384,14 @@ namespace PlayniteGo
             };
             var exportDate = DateTime.UtcNow;
 
-            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, currentIds, hltbPath, progressMessage, exportDate);
+            bool success = ProcessAndZip(gamesToProcess, payload, exportZipPath, currentIds, progressMessage, exportDate);
             if (success)
             {
                 PlayniteApi.Dialogs.ShowMessage($"Successfully synced {payload.UpdatedGames.Count} updates and {payload.DeletedGameIds.Count} deletions.", "Sync Complete");
             }
         }
 
-        private bool ProcessAndZip(List<Game> gamesToProcess, ExportPayload payload, string exportZipPath, HashSet<Guid> currentIds, string hltbPath, string progressMessage, DateTime exportDate)
+        private bool ProcessAndZip(List<Game> gamesToProcess, ExportPayload payload, string exportZipPath, HashSet<Guid> currentIds, string progressMessage, DateTime exportDate)
         {
             bool wasSuccess = false;
             var tempDir = Path.Combine(Path.GetTempPath(), "PlayniteExport_" + Guid.NewGuid());
@@ -470,35 +436,6 @@ namespace PlayniteGo
                 {
                     var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
 
-                    // --- HLTB Data Loading ---
-                    args.Text = $"Loading HowLongToBeat data...";
-                    args.IsIndeterminate = true;
-                    var hltbDataLookup = new Dictionary<Guid, HltbApi.HltbDataItem>();
-                    if (!string.IsNullOrEmpty(hltbPath))
-                    {
-                        foreach (var game in allGamesInLibrary)
-                        {
-                            if (args.CancelToken.IsCancellationRequested) { return; }
-                            string hltbDetailsPath = Path.Combine(hltbPath, "HowLongToBeat", $"{game.Id}.json");
-                            if (File.Exists(hltbDetailsPath))
-                            {
-                                try
-                                {
-                                    var hltbData = Serialization.FromJson<HltbApi.HltbData>(File.ReadAllText(hltbDetailsPath));
-                                    if (hltbData?.Items?.FirstOrDefault() is HltbApi.HltbDataItem dataItem)
-                                    {
-                                        hltbDataLookup[game.Id] = dataItem;
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    logger.Error(ex, $"Failed to parse HLTB data for game {game.Name} ({game.Id}).");
-                                }
-                            }
-                        }
-                    }
-                    Func<Game, HltbApi.HltbDataItem> getHltbData = (game) => hltbDataLookup.TryGetValue(game.Id, out var data) ? data : null;
-
                     // --- BUG FIX #2: Refactored stats generation to be complete for all categories ---
                     args.Text = $"Analyzing {allGamesInLibrary.Count} games for stats and filters...";
                     var playedGames = allGamesInLibrary.Where(g => g.Playtime > 0).ToList();
@@ -528,18 +465,13 @@ namespace PlayniteGo
                     };
 
                     // --- Backlog Calculation ---
-                    var backlogGames = unplayedGames.Select(g => new { Game = g, Hltb = getHltbData(g) }).Where(x => x.Hltb?.TimeData?.MainStoryAverage > 0).ToList();
-                    var longestBacklogGame = backlogGames.OrderByDescending(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
-                    var shortestBacklogGame = backlogGames.Where(g => g.Hltb.TimeData.MainStoryAverage > 0).OrderBy(g => g.Hltb.TimeData.MainStoryAverage).FirstOrDefault();
-                    long totalBacklogSeconds = backlogGames.Sum(g => (long)g.Hltb.TimeData.MainStoryAverage);
-
                     payload.Stats.Backlog = new BacklogStats
                     {
-                        TotalUnplayedGames = backlogGames.Count,
-                        TotalUnplayedHours = (int)(totalBacklogSeconds / SecondsInHour),
-                        CompletionDate = totalBacklogSeconds > 0 ? (DateTime?)DateTime.UtcNow.AddSeconds(totalBacklogSeconds) : null,
-                        LongestBacklogGame = longestBacklogGame == null ? null : new GameTime { Name = longestBacklogGame.Game.Name, Hours = (int)(longestBacklogGame.Hltb.TimeData.MainStoryAverage / SecondsInHour) },
-                        ShortestBacklogGame = shortestBacklogGame == null ? null : new GameTime { Name = shortestBacklogGame.Game.Name, Hours = (int)(shortestBacklogGame.Hltb.TimeData.MainStoryAverage / SecondsInHour) }
+                        TotalUnplayedGames = unplayedGames.Count,
+                        TotalUnplayedHours = 0,
+                        CompletionDate = null,
+                        LongestBacklogGame = null,
+                        ShortestBacklogGame = null
                     };
 
                     // --- Filter Options Calculation (based on All Games) ---
@@ -561,19 +493,15 @@ namespace PlayniteGo
 
                     ulong maxPlaytimeSeconds = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.Playtime) : 0;
                     ulong maxInstallSizeBytes = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.InstallSize ?? 0) : 0;
-                    var allHltbTimesInSeconds = hltbDataLookup.Values.Select(h => h.TimeData?.MainStoryAverage ?? 0).Where(t => t > 0).ToList();
-                    ulong maxHltbSeconds = allHltbTimesInSeconds.Any() ? allHltbTimesInSeconds.Max() : 0;
                     var gamesWithReleaseYear = allGamesInLibrary.Where(g => g.ReleaseDate != null).Select(g => g.ReleaseDate.Value.Year).ToList();
 
                     int maxPlaytimeHours = maxPlaytimeSeconds > 0 ? (int)Math.Ceiling(maxPlaytimeSeconds / SecondsInHour) : 0;
                     int maxInstallSizeGb = maxInstallSizeBytes > 0 ? (int)Math.Ceiling(maxInstallSizeBytes / BytesInGigabyte) : 0;
-                    int maxHltbHours = maxHltbSeconds > 0 ? (int)Math.Ceiling(maxHltbSeconds / SecondsInHour) : 0;
                     int minReleaseYear = gamesWithReleaseYear.Any() ? gamesWithReleaseYear.Min() : 1990;
                     int maxReleaseYear = gamesWithReleaseYear.Any() ? gamesWithReleaseYear.Max() : DateTime.Now.Year;
 
                     payload.FilterOptions.PlaytimeRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxPlaytimeHours) };
                     payload.FilterOptions.InstallSizeRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxInstallSizeGb) };
-                    payload.FilterOptions.HltbMainStoryRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxHltbHours) };
                     payload.FilterOptions.ReleaseYearRange = new RangeData { LowerBound = minReleaseYear, UpperBound = maxReleaseYear };
 
                     // --- Game Data Processing ---
@@ -585,7 +513,7 @@ namespace PlayniteGo
                     Parallel.ForEach(gamesToProcess, (game) =>
                     {
                         if (args.CancelToken.IsCancellationRequested) return;
-                        var gameExport = CreateGameExport(game, getHltbData(game), imagesDir, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds);
+                        var gameExport = CreateGameExport(game, imagesDir, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds);
                         if (gameExport != null) processedGames.Add(gameExport);
                         Interlocked.Increment(ref progress);
                         args.CurrentProgressValue = progress;
@@ -639,7 +567,7 @@ namespace PlayniteGo
             return wasSuccess;
         }
 
-        private GameExport CreateGameExport(Game game, HltbApi.HltbDataItem hltbData, string tempImagesDir, string imageCacheDir,
+        private GameExport CreateGameExport(Game game, string tempImagesDir, string imageCacheDir,
             Dictionary<string, List<Guid>> developerLookup,
             Dictionary<string, List<Guid>> publisherLookup,
             Dictionary<string, List<Guid>> seriesLookup,
@@ -665,7 +593,6 @@ namespace PlayniteGo
                 UserScore = game.UserScore,
                 Notes = game.Notes,
                 InstallSize = game.InstallSize,
-                HowLongToBeatData = hltbData,
                 Platforms = game.Platforms?.Select(p => p.Name).ToList() ?? new List<string>(),
                 Genres = game.Genres?.Select(g => g.Name).ToList() ?? new List<string>(),
                 Features = game.Features?.Select(f => f.Name).ToList() ?? new List<string>(),
@@ -683,12 +610,10 @@ namespace PlayniteGo
 
             gameExport.PlainTextDescription = StripHtml(game.Description);
             gameExport.ReleaseYear = game.ReleaseDate?.Year;
-            gameExport.HltbMainStoryInSeconds = hltbData?.TimeData?.MainStoryAverage;
             gameExport.DisplayPlatformNames = FormatPlatformNames(game.Platforms);
             gameExport.DisplayFirstGenre = FormatFirstGenre(game.Genres);
             gameExport.DisplayContributors = FormatContributors(game.Developers, game.Publishers);
             gameExport.DisplayPlaytime = FormatPlaytime(game.Playtime);
-            gameExport.DisplayHltbMain = FormatHltbMain(hltbData?.TimeData?.MainStoryAverage);
             gameExport.DisplayInstallSize = FormatInstallSize(game.InstallSize);
             gameExport.DisplayAddedDate = FormatShortDate(game.Added);
             gameExport.DisplayLastPlayed = FormatShortDate(game.LastActivity);
@@ -755,21 +680,6 @@ namespace PlayniteGo
             gameExport.RelatedSeriesGameIds = relatedSeriesIds.Select(id => id.ToString()).ToList();
 
             return gameExport;
-        }
-
-        private bool CheckPrerequisites(out string hltbPath, out bool hltbFound)
-        {
-            hltbPath = GetEffectivePath(hltbPluginId);
-            hltbFound = !string.IsNullOrEmpty(hltbPath);
-
-            return true;
-        }
-
-        private string GetEffectivePath(Guid pluginId)
-        {
-            var plugin = PlayniteApi.Addons.Plugins.FirstOrDefault(p => p.Id == pluginId);
-            if (plugin == null) return null;
-            return plugin.GetPluginUserDataPath();
         }
 
         private string ProcessAndCopyLocalImage(string databasePath, string tempImagesDir, string imageCacheDir, ImageType type)
@@ -1084,12 +994,6 @@ namespace PlayniteGo
         {
             if (playtimeInSeconds <= 0) return "";
             return $"{(int)(playtimeInSeconds / SecondsInHour)}h";
-        }
-
-        private static string FormatHltbMain(ulong? hltbMainInSeconds)
-        {
-            if (hltbMainInSeconds == null || hltbMainInSeconds <= 0) return null;
-            return $"{(int)(hltbMainInSeconds / SecondsInHour)}h";
         }
 
         private static string FormatInstallSize(ulong? installSizeInBytes)
