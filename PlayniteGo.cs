@@ -27,16 +27,6 @@ namespace PlayniteGo
 {
     // --- Data Models for Export ---
 
-    public class TimeData
-    {
-        public long MainStory { get; set; }
-        public long MainExtra { get; set; }
-        public long Completionist { get; set; }
-        public long MainStoryAverage { get; set; }
-        public long MainExtraAverage { get; set; }
-        public long CompletionistAverage { get; set; }
-    }
-
     public class ExportPayload
     {
         // --- ✅ NEW: ADDED SCHEMA VERSION ---
@@ -413,6 +403,8 @@ namespace PlayniteGo
                     ImageQuality = settings.Settings.ImageQuality
                 };
 
+                logger.Info($"Starting Export. Settings: Format={currentCacheSettings.ImageExportFormat}, CoverW={currentCacheSettings.CoverWidth}, BgW={currentCacheSettings.BackgroundWidth}, Quality={currentCacheSettings.ImageQuality}");
+
                 if (File.Exists(cacheSettingsFile))
                 {
                     try
@@ -420,6 +412,7 @@ namespace PlayniteGo
                         var savedSettings = Serialization.FromJson<ImageCacheSettings>(File.ReadAllText(cacheSettingsFile));
                         if (!Serialization.Equals(savedSettings, currentCacheSettings))
                         {
+                            logger.Info("Image settings changed. Invalidating cache.");
                             Directory.Delete(imageCacheDir, true);
                             Directory.CreateDirectory(imageCacheDir);
                         }
@@ -513,14 +506,24 @@ namespace PlayniteGo
                     Parallel.ForEach(gamesToProcess, (game) =>
                     {
                         if (args.CancelToken.IsCancellationRequested) return;
-                        var gameExport = CreateGameExport(game, imagesDir, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds);
-                        if (gameExport != null) processedGames.Add(gameExport);
+                        try 
+                        {
+                            var gameExport = CreateGameExport(game, imagesDir, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds);
+                            if (gameExport != null) processedGames.Add(gameExport);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.Error(ex, $"Failed to export game: {game.Name}");
+                        }
+
                         Interlocked.Increment(ref progress);
                         args.CurrentProgressValue = progress;
                         args.Text = $"Processing: {game.Name} ({progress}/{gamesToProcess.Count})";
                     });
 
                     if (args.CancelToken.IsCancellationRequested) return;
+
+                    logger.Info($"Processed {processedGames.Count} games out of {gamesToProcess.Count}.");
 
                     if (payload.Games != null) payload.Games = processedGames.OrderBy(g => g.Name).ToList();
                     if (payload.UpdatedGames != null) payload.UpdatedGames = processedGames.OrderBy(g => g.Name).ToList();
@@ -711,7 +714,7 @@ namespace PlayniteGo
             string cachedFilePath = Path.Combine(imageCacheDir, targetFileName);
             string finalExportPath = Path.Combine(tempImagesDir, targetFileName);
 
-            if (File.Exists(cachedFilePath) && File.GetLastWriteTimeUtc(sourcePath) <= File.GetLastWriteTimeUtc(cachedFilePath))
+            if (File.Exists(cachedFilePath) && new FileInfo(cachedFilePath).Length > 0 && File.GetLastWriteTimeUtc(sourcePath) <= File.GetLastWriteTimeUtc(cachedFilePath))
             {
                 try
                 {
