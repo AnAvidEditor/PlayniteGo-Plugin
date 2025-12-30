@@ -43,7 +43,6 @@ namespace PlayniteGo
         public SummaryStats AllGames { get; set; }
         public SummaryStats PlayedGames { get; set; }
         public SummaryStats UnplayedGames { get; set; }
-        public BacklogStats Backlog { get; set; }
     }
 
     public class SummaryStats
@@ -72,15 +71,6 @@ namespace PlayniteGo
         public GameScore NewestRelease { get; set; }
         public GameScore OldestAdded { get; set; }
         public GameScore NewestAdded { get; set; }
-    }
-
-    public class BacklogStats
-    {
-        public int TotalUnplayedGames { get; set; }
-        public int TotalUnplayedHours { get; set; }
-        public DateTime? CompletionDate { get; set; }
-        public GameTime LongestBacklogGame { get; set; }
-        public GameTime ShortestBacklogGame { get; set; }
     }
 
     public class RangeData
@@ -457,16 +447,6 @@ namespace PlayniteGo
                         UnplayedGames = unplayedGamesStats,
                     };
 
-                    // --- Backlog Calculation ---
-                    payload.Stats.Backlog = new BacklogStats
-                    {
-                        TotalUnplayedGames = unplayedGames.Count,
-                        TotalUnplayedHours = 0,
-                        CompletionDate = null,
-                        LongestBacklogGame = null,
-                        ShortestBacklogGame = null
-                    };
-
                     // --- Filter Options Calculation (based on All Games) ---
                     payload.FilterOptions = new ExportedFilterOptions
                     {
@@ -529,8 +509,7 @@ namespace PlayniteGo
                     if (payload.UpdatedGames != null) payload.UpdatedGames = processedGames.OrderBy(g => g.Name).ToList();
 
                     var jsonContent = Serialization.ToJson(payload, true);
-                    var obfuscatedContent = ObfuscateJson(jsonContent);
-                    File.WriteAllText(Path.Combine(tempDir, "library.json"), obfuscatedContent);
+                    File.WriteAllText(Path.Combine(tempDir, "library.json"), jsonContent);
 
                     if (args.CancelToken.IsCancellationRequested) return;
 
@@ -1012,25 +991,6 @@ namespace PlayniteGo
         private static string FormatShortDate(DateTime? date)
         {
             return date?.ToString("d", CultureInfo.CurrentCulture);
-        }
-
-        private string ObfuscateJson(string json)
-        {
-            // 1. Convert the JSON string to a byte array
-            var bytes = Encoding.UTF8.GetBytes(json);
-
-            // 2. Compress the byte array using an in-memory Gzip stream
-            using (var outputStream = new MemoryStream())
-            {
-                using (var gzipStream = new GZipStream(outputStream, CompressionMode.Compress))
-                {
-                    gzipStream.Write(bytes, 0, bytes.Length);
-                }
-                var compressedBytes = outputStream.ToArray();
-
-                // 3. Convert the compressed binary data to a Base64 string and return it
-                return Convert.ToBase64String(compressedBytes);
-            }
         }
 
         private string GenerateDiagnosticReport()
