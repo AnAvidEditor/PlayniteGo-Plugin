@@ -170,6 +170,12 @@ namespace PlayniteGo
         public bool HasVRSupport { get; set; }
         public bool HasUltrawideSupport { get; set; }
         public bool HasHDRSupport { get; set; }
+
+        // --- NEW: HLTB DATA ---
+        public int? HltbTime { get; set; }         
+        public int? HltbExtra { get; set; }        
+        public int? HltbCompletionist { get; set; } 
+        public string DisplayHltbTime { get; set; } 
     }
 
 
@@ -385,6 +391,11 @@ namespace PlayniteGo
                 var cacheSettingsFile = Path.Combine(imageCacheDir, "cache.settings.json");
                 Directory.CreateDirectory(imageCacheDir);
 
+                // --- NEW: INITIALIZE HLTB ---
+                var hltbManager = new HltbManager();
+                var pluginInstallPath = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                var hltbPath = Path.Combine(pluginInstallPath, "hltb_dataset.csv");
+
                 var currentCacheSettings = new ImageCacheSettings
                 {
                     ImageExportFormat = settings.Settings.ImageExportFormat,
@@ -417,6 +428,10 @@ namespace PlayniteGo
 
                 PlayniteApi.Dialogs.ActivateGlobalProgress(args =>
                 {
+                    // --- NEW: LOAD DATABASE ---
+                    args.Text = "Loading HowLongToBeat Database...";
+                    hltbManager.LoadDatabase(hltbPath);
+
                     var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
 
                     // --- BUG FIX #2: Refactored stats generation to be complete for all categories ---
@@ -488,7 +503,8 @@ namespace PlayniteGo
                         if (args.CancelToken.IsCancellationRequested) return;
                         try 
                         {
-                            var gameExport = CreateGameExport(game, imagesDir, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds);
+                            // --- CHANGED: PASS hltbManager HERE ---
+                            var gameExport = CreateGameExport(game, imagesDir, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds, hltbManager);
                             if (gameExport != null) processedGames.Add(gameExport);
                         }
                         catch (Exception ex)
@@ -553,7 +569,8 @@ namespace PlayniteGo
             Dictionary<string, List<Guid>> developerLookup,
             Dictionary<string, List<Guid>> publisherLookup,
             Dictionary<string, List<Guid>> seriesLookup,
-            HashSet<Guid> allExportedGameIds)
+            HashSet<Guid> allExportedGameIds,
+            HltbManager hltbManager) // <--- ADDED PARAMETER
         {
             var gameExport = new GameExport
             {
@@ -603,6 +620,22 @@ namespace PlayniteGo
             gameExport.HasVRSupport = CheckSupport(game, VrKeywords);
             gameExport.HasUltrawideSupport = CheckSupport(game, UltrawideKeywords);
             gameExport.HasHDRSupport = CheckSupport(game, HdrKeywords);
+
+            // --- NEW: FILL HLTB DATA ---
+            if (hltbManager != null)
+            {
+                var hltbData = hltbManager.GetTime(game.Name);
+                if (hltbData != null)
+                {
+                    gameExport.HltbTime = hltbData.MainStory;
+                    gameExport.HltbExtra = hltbData.MainExtra;
+                    gameExport.HltbCompletionist = hltbData.Completionist;
+                    if (gameExport.HltbTime > 0)
+                    {
+                        gameExport.DisplayHltbTime = $"{gameExport.HltbTime}h";
+                    }
+                }
+            }
 
             var relatedDeveloperIds = new HashSet<Guid>();
             if (game.Developers != null)

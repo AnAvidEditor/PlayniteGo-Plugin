@@ -76,6 +76,7 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="HltbManager.cs" />
     <Compile Include="PlayniteGoSettingsViewModel.cs" />
     <Compile Include="PlayniteGo.cs" />
     <Compile Include="PlayniteGoSettings.cs" />
@@ -89,6 +90,9 @@
     <None Include="extension.yaml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <Content Include="hltb_dataset.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
