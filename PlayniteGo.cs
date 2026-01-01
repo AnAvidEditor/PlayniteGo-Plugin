@@ -391,10 +391,18 @@ namespace PlayniteGo
                 var cacheSettingsFile = Path.Combine(imageCacheDir, "cache.settings.json");
                 Directory.CreateDirectory(imageCacheDir);
 
-                // --- NEW: INITIALIZE HLTB ---
+                // --- NEW: INITIALIZE HLTB WITH DEBUGGING ---
                 var hltbManager = new HltbManager();
-                var pluginInstallPath = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+
+                // Debugging Path Logic
+                var assemblyLocation = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                var pluginInstallPath = Path.GetDirectoryName(assemblyLocation);
                 var hltbPath = Path.Combine(pluginInstallPath, "hltb_dataset.csv");
+
+                logger.Info($"[PlayniteGo] Assembly Location: {assemblyLocation}");
+                logger.Info($"[PlayniteGo] Calculated Install Path: {pluginInstallPath}");
+                logger.Info($"[PlayniteGo] Target CSV Path: {hltbPath}");
+                logger.Info($"[PlayniteGo] Does CSV exist? {File.Exists(hltbPath)}");
 
                 var currentCacheSettings = new ImageCacheSettings
                 {

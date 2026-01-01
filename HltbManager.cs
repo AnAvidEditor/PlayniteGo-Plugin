@@ -23,24 +23,32 @@ namespace PlayniteGo
 
         public void LoadDatabase(string csvPath)
         {
+            logger.Info($"[PlayniteGo] HltbManager: Attempting to load CSV from: '{csvPath}'");
+
             _exactMatchCache = new Dictionary<string, HltbData>(StringComparer.OrdinalIgnoreCase);
             _normalizedCache = new Dictionary<string, HltbData>();
 
             if (!File.Exists(csvPath))
             {
-                logger.Error($"HLTB CSV not found at: {csvPath}");
+                logger.Error($"[PlayniteGo] HltbManager: CRITICAL ERROR - File does not exist at path: {csvPath}");
                 return;
             }
 
             try
             {
+                int rowCount = 0;
                 using (var reader = new StreamReader(csvPath))
                 {
                     // 1. Read Header
                     var headerLine = reader.ReadLine();
-                    if (string.IsNullOrEmpty(headerLine)) return;
+                    if (string.IsNullOrEmpty(headerLine))
+                    {
+                        logger.Error("[PlayniteGo] HltbManager: CSV file is empty.");
+                        return;
+                    }
 
                     var headers = headerLine.Split(',').Select(h => h.Trim().ToLowerInvariant()).ToList();
+                    logger.Info($"[PlayniteGo] HltbManager: Headers found: {string.Join(", ", headers)}");
 
                     // 2. Identify Columns
                     int nameIdx = headers.IndexOf("name");
@@ -50,7 +58,7 @@ namespace PlayniteGo
 
                     if (nameIdx == -1 || mainIdx == -1)
                     {
-                        logger.Error("Could not identify 'name' or 'main_story' columns in the CSV.");
+                        logger.Error($"[PlayniteGo] HltbManager: Missing columns! nameIdx={nameIdx}, mainIdx={mainIdx}");
                         return;
                     }
 
@@ -58,20 +66,16 @@ namespace PlayniteGo
                     while (!reader.EndOfStream)
                     {
                         var line = reader.ReadLine();
+                        if (string.IsNullOrWhiteSpace(line)) continue;
 
-                        // FIX #1: Corrected String Escaping for C# Regex
-                        // This regex handles commas inside quotes correctly
+                        // Regex handles commas inside quotes e.g. "Pokemon, Y"
                         var parts = Regex.Split(line, ",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)");
 
                         if (parts.Length <= mainIdx) continue;
 
                         string name = parts[nameIdx].Trim('"');
-
-                        // Parse decimal hours (e.g. "10.62") to integer
                         int main = ParseHours(parts[mainIdx]);
                         int extra = (extraIdx != -1 && parts.Length > extraIdx) ? ParseHours(parts[extraIdx]) : 0;
-
-                        // FIX #2: Removed the broken/unused 'int complete =' line that referenced undefined variables
                         int completeVal = (compIdx != -1 && parts.Length > compIdx) ? ParseHours(parts[compIdx]) : 0;
 
                         var data = new HltbData
@@ -86,13 +90,15 @@ namespace PlayniteGo
                         string normKey = NormalizeGameName(name);
                         if (!string.IsNullOrEmpty(normKey) && !_normalizedCache.ContainsKey(normKey))
                             _normalizedCache[normKey] = data;
+
+                        rowCount++;
                     }
                 }
-                logger.Info($"Loaded {_exactMatchCache.Count} HLTB entries.");
+                logger.Info($"[PlayniteGo] HltbManager: Successfully loaded {rowCount} rows. Cache size: {_exactMatchCache.Count}");
             }
             catch (Exception ex)
             {
-                logger.Error(ex, "Failed to load HLTB CSV.");
+                logger.Error(ex, "[PlayniteGo] HltbManager: Exception while loading CSV.");
             }
         }
 
@@ -108,7 +114,8 @@ namespace PlayniteGo
 
         public HltbData GetTime(string gameName)
         {
-            if (_exactMatchCache == null) return null;
+            if (_exactMatchCache == null || _exactMatchCache.Count == 0) return null;
+
             if (_exactMatchCache.TryGetValue(gameName, out var data)) return data;
 
             var normKey = NormalizeGameName(gameName);
