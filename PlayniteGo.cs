@@ -611,8 +611,8 @@ namespace PlayniteGo
                 Tags = game.Tags?.Select(t => t.Name).ToList() ?? new List<string>(),
                 Categories = game.Categories?.Select(c => c.Name).ToList() ?? new List<string>(),
                 Regions = game.Regions?.Select(r => r.Name).ToList() ?? new List<string>(),
-                CoverImagePath = ProcessAndCopyLocalImage(game.CoverImage, tempImagesDir, imageCacheDir, ImageType.Cover),
-                BackgroundImagePath = ProcessAndCopyLocalImage(game.BackgroundImage, tempImagesDir, imageCacheDir, ImageType.Background),
+                CoverImagePath = ProcessAndCopyLocalImage(game, game.CoverImage, tempImagesDir, imageCacheDir, ImageType.Cover),
+                BackgroundImagePath = ProcessAndCopyLocalImage(game, game.BackgroundImage, tempImagesDir, imageCacheDir, ImageType.Background),
             };
 
             gameExport.PlainTextDescription = StripHtml(game.Description);
@@ -642,6 +642,7 @@ namespace PlayniteGo
                     {
                         gameExport.DisplayHltbTime = $"{gameExport.HltbTime}h";
                     }
+                    logger.Debug($"[PlayniteGo] Assigned HLTB to {game.Name}: Time={gameExport.HltbTime}, Display={gameExport.DisplayHltbTime}");
                 }
             }
 
@@ -705,7 +706,7 @@ namespace PlayniteGo
             return gameExport;
         }
 
-        private string ProcessAndCopyLocalImage(string databasePath, string tempImagesDir, string imageCacheDir, ImageType type)
+        private string ProcessAndCopyLocalImage(Game game, string databasePath, string tempImagesDir, string imageCacheDir, ImageType type)
         {
             if (string.IsNullOrEmpty(databasePath) || databasePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
@@ -719,18 +720,17 @@ namespace PlayniteGo
                 return null;
             }
 
-            string originalFileName = Path.GetFileName(databasePath);
-            string targetFileName = originalFileName;
-
+            string extension = Path.GetExtension(databasePath);
             if (settings.Settings.ImageExportFormat == "WebP")
             {
-                targetFileName = Path.ChangeExtension(originalFileName, ".webp");
+                extension = ".webp";
             }
             else if (settings.Settings.ImageExportFormat == "JPEG")
             {
-                targetFileName = Path.ChangeExtension(originalFileName, ".jpg");
+                extension = ".jpg";
             }
 
+            string targetFileName = $"{game.Id}_{type}{extension}";
             string cachedFilePath = Path.Combine(imageCacheDir, targetFileName);
             string finalExportPath = Path.Combine(tempImagesDir, targetFileName);
 

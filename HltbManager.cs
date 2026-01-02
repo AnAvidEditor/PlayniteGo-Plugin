@@ -47,7 +47,8 @@ namespace PlayniteGo
                         return;
                     }
 
-                    var headers = headerLine.Split(',').Select(h => h.Trim().ToLowerInvariant()).ToList();
+                    // FIX: Trim whitespace AND quotes from headers
+                    var headers = headerLine.Split(',').Select(h => h.Trim().Trim('"').ToLowerInvariant()).ToList();
                     logger.Info($"[PlayniteGo] HltbManager: Headers found: {string.Join(", ", headers)}");
 
                     // 2. Identify Columns
@@ -74,9 +75,10 @@ namespace PlayniteGo
                         if (parts.Length <= mainIdx) continue;
 
                         string name = parts[nameIdx].Trim('"');
-                        int main = ParseHours(parts[mainIdx]);
-                        int extra = (extraIdx != -1 && parts.Length > extraIdx) ? ParseHours(parts[extraIdx]) : 0;
-                        int completeVal = (compIdx != -1 && parts.Length > compIdx) ? ParseHours(parts[compIdx]) : 0;
+                        // FIX: Trim quotes from number strings before parsing
+                        int main = ParseHours(parts[mainIdx].Trim('"'));
+                        int extra = (extraIdx != -1 && parts.Length > extraIdx) ? ParseHours(parts[extraIdx].Trim('"')) : 0;
+                        int completeVal = (compIdx != -1 && parts.Length > compIdx) ? ParseHours(parts[compIdx].Trim('"')) : 0;
 
                         var data = new HltbData
                         {
@@ -114,13 +116,26 @@ namespace PlayniteGo
 
         public HltbData GetTime(string gameName)
         {
-            if (_exactMatchCache == null || _exactMatchCache.Count == 0) return null;
+            if (_exactMatchCache == null || _exactMatchCache.Count == 0)
+            {
+                logger.Warn($"[PlayniteGo] HLTB: Lookup for '{gameName}' failed because database is not loaded.");
+                return null;
+            }
 
-            if (_exactMatchCache.TryGetValue(gameName, out var data)) return data;
+            if (_exactMatchCache.TryGetValue(gameName, out var data))
+            {
+                logger.Info($"[PlayniteGo] HLTB: Exact match found for '{gameName}' (Main: {data.MainStory}h)");
+                return data;
+            }
 
             var normKey = NormalizeGameName(gameName);
-            if (!string.IsNullOrEmpty(normKey) && _normalizedCache.TryGetValue(normKey, out var normData)) return normData;
+            if (!string.IsNullOrEmpty(normKey) && _normalizedCache.TryGetValue(normKey, out var normData))
+            {
+                logger.Info($"[PlayniteGo] HLTB: Normalized match found for '{gameName}' -> '{normKey}' (Main: {normData.MainStory}h)");
+                return normData;
+            }
 
+            logger.Debug($"[PlayniteGo] HLTB: No match found for '{gameName}'");
             return null;
         }
 
