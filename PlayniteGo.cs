@@ -30,7 +30,7 @@ namespace PlayniteGo
     public class ExportPayload
     {
         // --- ✅ NEW: ADDED SCHEMA VERSION ---
-        public int SchemaVersion { get; set; } = 1;
+        public int SchemaVersion { get; set; } = 2;
         public List<GameExport> Games { get; set; }
         public List<GameExport> UpdatedGames { get; set; }
         public List<Guid> DeletedGameIds { get; set; }
