@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Playnite.SDK;
+using Playnite.SDK.Data;
 
 namespace PlayniteGo
 {
@@ -13,12 +14,33 @@ namespace PlayniteGo
         private readonly ILogger logger = LogManager.GetLogger();
         private Dictionary<string, HltbData> _exactMatchCache;
         private Dictionary<string, HltbData> _normalizedCache;
+        private const string HltbExtensionId = "e08cd51f-9c9a-4ee3-a094-fde03b55492f";
+
+        public string ExtensionsDataPath { get; set; }
 
         public class HltbData
         {
             public int MainStory { get; set; }
             public int MainExtra { get; set; }
             public int Completionist { get; set; }
+        }
+
+        // --- Models for Local Extension JSON ---
+        public class HltbUserGameData
+        {
+            public List<HltbItem> Items { get; set; }
+        }
+
+        public class HltbItem
+        {
+            public HltbPluginData GameHltbData { get; set; }
+        }
+
+        public class HltbPluginData
+        {
+            public long MainStoryMedian { get; set; }
+            public long MainExtraMedian { get; set; }
+            public long CompletionistMedian { get; set; }
         }
 
         public void LoadDatabase(string csvPath)
@@ -114,28 +136,70 @@ namespace PlayniteGo
             return 0;
         }
 
-        public HltbData GetTime(string gameName)
+        public HltbData GetTime(string gameName, Guid? gameId = null)
         {
-            if (_exactMatchCache == null || _exactMatchCache.Count == 0)
+            if (_exactMatchCache == null)
             {
-                logger.Warn($"[PlayniteGo] HLTB: Lookup for '{gameName}' failed because database is not loaded.");
+                logger.Warn($"[PlayniteGo] HLTB: Lookup for '{gameName}' failed because database is not initialized.");
                 return null;
             }
 
+            // 1. Try Exact Match (CSV)
             if (_exactMatchCache.TryGetValue(gameName, out var data))
             {
-                logger.Info($"[PlayniteGo] HLTB: Exact match found for '{gameName}' (Main: {data.MainStory}h)");
+                logger.Info($"[PlayniteGo] HLTB: Exact CSV match found for '{gameName}' (Main: {data.MainStory}h)");
                 return data;
             }
 
+            // 2. Try Normalized Match (CSV)
             var normKey = NormalizeGameName(gameName);
             if (!string.IsNullOrEmpty(normKey) && _normalizedCache.TryGetValue(normKey, out var normData))
             {
-                logger.Info($"[PlayniteGo] HLTB: Normalized match found for '{gameName}' -> '{normKey}' (Main: {normData.MainStory}h)");
+                logger.Info($"[PlayniteGo] HLTB: Normalized CSV match found for '{gameName}' -> '{normKey}' (Main: {normData.MainStory}h)");
                 return normData;
             }
 
+            // 3. Try Local Extension Cache Fallback
+            if (gameId.HasValue && !string.IsNullOrEmpty(ExtensionsDataPath))
+            {
+                var extData = GetTimeFromLocalExtension(gameId.Value);
+                if (extData != null)
+                {
+                    logger.Info($"[PlayniteGo] HLTB: Local Extension match found for '{gameName}' ({gameId}) (Main: {extData.MainStory}h)");
+                    return extData;
+                }
+            }
+
             logger.Debug($"[PlayniteGo] HLTB: No match found for '{gameName}'");
+            return null;
+        }
+
+        private HltbData GetTimeFromLocalExtension(Guid gameId)
+        {
+            try
+            {
+                string jsonPath = Path.Combine(ExtensionsDataPath, HltbExtensionId, "HowLongToBeat", $"{gameId}.json");
+                if (File.Exists(jsonPath))
+                {
+                    string json = File.ReadAllText(jsonPath);
+                    var wrapper = Serialization.FromJson<HltbUserGameData>(json);
+                    var item = wrapper?.Items?.FirstOrDefault();
+                    if (item?.GameHltbData != null)
+                    {
+                        // Times are in seconds, convert to hours
+                        return new HltbData
+                        {
+                            MainStory = (int)Math.Round(item.GameHltbData.MainStoryMedian / 3600.0),
+                            MainExtra = (int)Math.Round(item.GameHltbData.MainExtraMedian / 3600.0),
+                            Completionist = (int)Math.Round(item.GameHltbData.CompletionistMedian / 3600.0)
+                        };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, $"[PlayniteGo] Failed to read local HLTB extension data for {gameId}");
+            }
             return null;
         }
 

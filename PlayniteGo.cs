@@ -393,6 +393,7 @@ namespace PlayniteGo
 
                 // --- NEW: INITIALIZE HLTB WITH DEBUGGING ---
                 var hltbManager = new HltbManager();
+                hltbManager.ExtensionsDataPath = PlayniteApi.Paths.ExtensionsDataPath;
 
                 // Debugging Path Logic
                 var assemblyLocation = System.Reflection.Assembly.GetExecutingAssembly().Location;
@@ -632,7 +633,7 @@ namespace PlayniteGo
             // --- NEW: FILL HLTB DATA ---
             if (hltbManager != null)
             {
-                var hltbData = hltbManager.GetTime(game.Name);
+                var hltbData = hltbManager.GetTime(game.Name, game.Id);
                 if (hltbData != null)
                 {
                     gameExport.HltbTime = hltbData.MainStory;
