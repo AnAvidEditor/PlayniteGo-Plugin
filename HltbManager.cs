@@ -50,6 +50,9 @@ namespace PlayniteGo
             _exactMatchCache = new Dictionary<string, HltbData>(StringComparer.OrdinalIgnoreCase);
             _normalizedCache = new Dictionary<string, HltbData>();
 
+            // --- OPTIMIZATION: Pre-scan local extension directory ---
+            InitializeLocalCache();
+
             if (!File.Exists(csvPath))
             {
                 logger.Error($"[PlayniteGo] HltbManager: CRITICAL ERROR - File does not exist at path: {csvPath}");
@@ -70,7 +73,7 @@ namespace PlayniteGo
                     }
 
                     // FIX: Trim whitespace AND quotes from headers
-                    var headers = headerLine.Split(',').Select(h => h.Trim().Trim('"').ToLowerInvariant()).ToList();
+                    var headers = ParseCsvLine(headerLine).Select(h => h.Trim().Trim('"').ToLowerInvariant()).ToList();
                     logger.Info($"[PlayniteGo] HltbManager: Headers found: {string.Join(", ", headers)}");
 
                     // 2. Identify Columns
@@ -91,16 +94,15 @@ namespace PlayniteGo
                         var line = reader.ReadLine();
                         if (string.IsNullOrWhiteSpace(line)) continue;
 
-                        // Regex handles commas inside quotes e.g. "Pokemon, Y"
-                        var parts = Regex.Split(line, ",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)");
+                        var parts = ParseCsvLine(line);
 
-                        if (parts.Length <= mainIdx) continue;
+                        if (parts.Count <= mainIdx) continue;
 
                         string name = parts[nameIdx].Trim('"');
                         // FIX: Trim quotes from number strings before parsing
                         int main = ParseHours(parts[mainIdx].Trim('"'));
-                        int extra = (extraIdx != -1 && parts.Length > extraIdx) ? ParseHours(parts[extraIdx].Trim('"')) : 0;
-                        int completeVal = (compIdx != -1 && parts.Length > compIdx) ? ParseHours(parts[compIdx].Trim('"')) : 0;
+                        int extra = (extraIdx != -1 && parts.Count > extraIdx) ? ParseHours(parts[extraIdx].Trim('"')) : 0;
+                        int completeVal = (compIdx != -1 && parts.Count > compIdx) ? ParseHours(parts[compIdx].Trim('"')) : 0;
 
                         var data = new HltbData
                         {
@@ -123,6 +125,60 @@ namespace PlayniteGo
             catch (Exception ex)
             {
                 logger.Error(ex, "[PlayniteGo] HltbManager: Exception while loading CSV.");
+            }
+        }
+
+        // --- OPTIMIZATION: Manual CSV Parser (Faster than Regex) ---
+        private List<string> ParseCsvLine(string line)
+        {
+            var result = new List<string>();
+            bool inQuotes = false;
+            int start = 0;
+
+            for (int i = 0; i < line.Length; i++)
+            {
+                if (line[i] == '"')
+                {
+                    inQuotes = !inQuotes;
+                }
+                else if (line[i] == ',' && !inQuotes)
+                {
+                    result.Add(line.Substring(start, i - start));
+                    start = i + 1;
+                }
+            }
+            result.Add(line.Substring(start));
+            return result;
+        }
+
+        private HashSet<Guid> _localHltbAvailableIds;
+
+        private void InitializeLocalCache()
+        {
+            _localHltbAvailableIds = new HashSet<Guid>();
+            if (string.IsNullOrEmpty(ExtensionsDataPath)) return;
+
+            try 
+            {
+                string dirPath = Path.Combine(ExtensionsDataPath, HltbExtensionId, "HowLongToBeat");
+                if (Directory.Exists(dirPath))
+                {
+                    // Enumerate files is faster than GetFiles for large directories as we don't need the array immediately
+                    // But we want to store IDs.
+                    var files = Directory.GetFiles(dirPath, "*.json");
+                    foreach (var file in files)
+                    {
+                        if (Guid.TryParse(Path.GetFileNameWithoutExtension(file), out Guid id))
+                        {
+                            _localHltbAvailableIds.Add(id);
+                        }
+                    }
+                    logger.Info($"[PlayniteGo] HltbManager: Found {_localHltbAvailableIds.Count} local HLTB data files.");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "[PlayniteGo] HltbManager: Failed to initialize local HLTB cache.");
             }
         }
 
@@ -160,7 +216,7 @@ namespace PlayniteGo
             }
 
             // 3. Try Local Extension Cache Fallback
-            if (gameId.HasValue && !string.IsNullOrEmpty(ExtensionsDataPath))
+            if (gameId.HasValue && _localHltbAvailableIds != null && _localHltbAvailableIds.Contains(gameId.Value))
             {
                 var extData = GetTimeFromLocalExtension(gameId.Value);
                 if (extData != null)

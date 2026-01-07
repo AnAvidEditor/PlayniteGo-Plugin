@@ -715,7 +715,10 @@ namespace PlayniteGo
             }
 
             string sourcePath = PlayniteApi.Database.GetFullFilePath(databasePath);
-            if (!File.Exists(sourcePath))
+            var sourceInfo = new FileInfo(sourcePath);
+
+            // Optimization: Check existence using FileInfo
+            if (!sourceInfo.Exists)
             {
                 logger.Warn($"Image source file not found: {sourcePath}");
                 return null;
@@ -735,7 +738,10 @@ namespace PlayniteGo
             string cachedFilePath = Path.Combine(imageCacheDir, targetFileName);
             string finalExportPath = Path.Combine(tempImagesDir, targetFileName);
 
-            if (File.Exists(cachedFilePath) && new FileInfo(cachedFilePath).Length > 0 && File.GetLastWriteTimeUtc(sourcePath) <= File.GetLastWriteTimeUtc(cachedFilePath))
+            var cachedInfo = new FileInfo(cachedFilePath);
+
+            // Optimization: Check cache using FileInfo to minimize I/O calls (Exists, Length, Time all from one metadata fetch)
+            if (cachedInfo.Exists && cachedInfo.Length > 0 && sourceInfo.LastWriteTimeUtc <= cachedInfo.LastWriteTimeUtc)
             {
                 try
                 {
