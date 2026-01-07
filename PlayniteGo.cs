@@ -29,7 +29,6 @@ namespace PlayniteGo
 
     public class ExportPayload
     {
-        // --- ✅ NEW: ADDED SCHEMA VERSION ---
         public int SchemaVersion { get; set; } = 2;
         public List<GameExport> Games { get; set; }
         public List<GameExport> UpdatedGames { get; set; }
@@ -118,7 +117,6 @@ namespace PlayniteGo
 
     public class GameExport
     {
-        // --- CORE DATA ---
         public Guid Id { get; set; }
         public string Name { get; set; }
         public string Source { get; set; }
@@ -140,7 +138,6 @@ namespace PlayniteGo
         public string Notes { get; set; }
         public ulong? InstallSize { get; set; }
 
-        // --- CORE RELATIONSHIPS (RAW DATA) ---
         public List<string> Platforms { get; set; }
         public List<string> Genres { get; set; }
         public List<string> Features { get; set; }
@@ -156,7 +153,6 @@ namespace PlayniteGo
         public List<string> RelatedPublisherGameIds { get; set; }
         public List<string> RelatedSeriesGameIds { get; set; }
 
-        // --- NEW: PRE-COMPUTED & PRE-FORMATTED FIELDS FOR THIN CLIENT ---
         public string PlainTextDescription { get; set; }
         public int? ReleaseYear { get; set; }
         public string DisplayPlatformNames { get; set; }
@@ -171,20 +167,17 @@ namespace PlayniteGo
         public bool HasUltrawideSupport { get; set; }
         public bool HasHDRSupport { get; set; }
 
-        // --- NEW: HLTB DATA ---
         public int? HltbTime { get; set; }         
         public int? HltbExtra { get; set; }        
         public int? HltbCompletionist { get; set; } 
         public string DisplayHltbTime { get; set; } 
     }
 
-
     public class LinkExport
     {
         public string Name { get; set; }
         public string Url { get; set; }
     }
-
 
     public class PlayniteGo : GenericPlugin
     {
@@ -208,7 +201,6 @@ namespace PlayniteGo
         private const string stateFileName = "exportState.json";
         private enum ImageType { Cover, Background }
 
-
         private const double SecondsInHour = 3600.0;
         private const double BytesInGigabyte = 1073741824.0;
         private const double BytesInMegabyte = 1048576.0;
@@ -220,8 +212,29 @@ namespace PlayniteGo
 
         private static bool CheckSupport(Game g, string[] keywords)
         {
-            if (g.Features?.Any(f => keywords.Any(k => f.Name.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0)) == true) return true;
-            if (g.Tags?.Any(t => keywords.Any(k => t.Name.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0)) == true) return true;
+            if (g.Features != null)
+            {
+                foreach (var f in g.Features)
+                {
+                    if (string.IsNullOrEmpty(f.Name)) continue;
+                    foreach (var k in keywords)
+                    {
+                        if (f.Name.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                    }
+                }
+            }
+
+            if (g.Tags != null)
+            {
+                foreach (var t in g.Tags)
+                {
+                    if (string.IsNullOrEmpty(t.Name)) continue;
+                    foreach (var k in keywords)
+                    {
+                        if (t.Name.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                    }
+                }
+            }
             return false;
         }
 
@@ -231,8 +244,6 @@ namespace PlayniteGo
             {
                 HasSettings = true
             };
-
-            // This single line creates the ViewModel, which in turn handles creating and loading the settings.
             settings = new PlayniteGoSettingsViewModel(this);
         }
 
@@ -254,7 +265,7 @@ namespace PlayniteGo
                 },
                 new MainMenuItem
                 {
-                    Description = "-", // Separator
+                    Description = "-",
                     MenuSection = "@PlayniteGo"
                 },
                 new MainMenuItem
@@ -283,7 +294,6 @@ namespace PlayniteGo
                     }
                 }
             };
-
             return menuItems;
         }
 
@@ -381,20 +391,15 @@ namespace PlayniteGo
         {
             bool wasSuccess = false;
             
-            // --- OPTIMIZATION: REMOVED TEMP DIR ---
-            // We no longer copy files to a temp directory. We stream directly from Cache to Zip.
-
             try
             {
                 var imageCacheDir = Path.Combine(GetPluginUserDataPath(), "ImageCache");
                 var cacheSettingsFile = Path.Combine(imageCacheDir, "cache.settings.json");
                 Directory.CreateDirectory(imageCacheDir);
 
-                // --- NEW: INITIALIZE HLTB WITH DEBUGGING ---
                 var hltbManager = new HltbManager();
                 hltbManager.ExtensionsDataPath = PlayniteApi.Paths.ExtensionsDataPath;
 
-                // Debugging Path Logic
                 var assemblyLocation = System.Reflection.Assembly.GetExecutingAssembly().Location;
                 var pluginInstallPath = Path.GetDirectoryName(assemblyLocation);
                 var hltbPath = Path.Combine(pluginInstallPath, "hltb_dataset.csv");
@@ -436,35 +441,26 @@ namespace PlayniteGo
 
                 PlayniteApi.Dialogs.ActivateGlobalProgress(args =>
                 {
-                    // --- NEW: Consolidate status to prevent UI flash ---
                     args.Text = "Preparing export data...";
                     args.IsIndeterminate = true;
 
-                    // --- NEW: LOAD DATABASE ---
                     hltbManager.LoadDatabase(hltbPath);
 
-                    var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
+                    // Clear lookups for fresh export
+                    developerLookup.Clear();
+                    publisherLookup.Clear();
+                    seriesLookup.Clear();
 
-                    // --- BUG FIX #2: Refactored stats generation to be complete for all categories ---
-                    // args.Text = $"Analyzing {allGamesInLibrary.Count} games for stats and filters..."; // Commented out to prevent flash
+                    var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
+                    
+                    // --- OPTIMIZATION: Single pass for stats and filter options ---
+                    var allGamesStats = GenerateSummaryStatsForCollection(allGamesInLibrary, out var filterOptions);
+                    
                     var playedGames = allGamesInLibrary.Where(g => g.Playtime > 0).ToList();
                     var unplayedGames = allGamesInLibrary.Where(g => g.Playtime <= 0).ToList();
 
-                    // --- Lookups for related games, built once from the full library ---
-                    var developerLookup = new Dictionary<string, List<Guid>>();
-                    var publisherLookup = new Dictionary<string, List<Guid>>();
-                    var seriesLookup = new Dictionary<string, List<Guid>>();
-                    foreach (var game in allGamesInLibrary)
-                    {
-                        if (game.Developers != null) foreach (var d in game.Developers) { if (!developerLookup.ContainsKey(d.Name)) developerLookup[d.Name] = new List<Guid>(); developerLookup[d.Name].Add(game.Id); }
-                        if (game.Publishers != null) foreach (var p in game.Publishers) { if (!publisherLookup.ContainsKey(p.Name)) publisherLookup[p.Name] = new List<Guid>(); publisherLookup[p.Name].Add(game.Id); }
-                        if (game.Series != null) foreach (var s in game.Series) { if (!seriesLookup.ContainsKey(s.Name)) seriesLookup[s.Name] = new List<Guid>(); seriesLookup[s.Name].Add(game.Id); }
-                    }
-
-                    // --- Generate complete stats for each category ---
-                    var allGamesStats = GenerateSummaryStatsForCollection(allGamesInLibrary);
-                    var playedGamesStats = GenerateSummaryStatsForCollection(playedGames);
-                    var unplayedGamesStats = GenerateSummaryStatsForCollection(unplayedGames);
+                    var playedGamesStats = GenerateSummaryStatsForCollection(playedGames, out _);
+                    var unplayedGamesStats = GenerateSummaryStatsForCollection(unplayedGames, out _);
 
                     payload.Stats = new ExportedStats
                     {
@@ -473,22 +469,7 @@ namespace PlayniteGo
                         UnplayedGames = unplayedGamesStats,
                     };
 
-                    // --- Filter Options Calculation (based on All Games) ---
-                    payload.FilterOptions = new ExportedFilterOptions
-                    {
-                        Sources = allGamesStats.AllSources.Select(d => d.Name).OrderBy(n => n).ToList(),
-                        CompletionStatuses = allGamesStats.CompletionStatusCounts.Select(d => d.Name).OrderBy(n => n).ToList(),
-                        Platforms = allGamesStats.AllPlatforms.Select(d => d.Name).OrderBy(n => n).ToList(),
-                        Genres = allGamesInLibrary.SelectMany(g => g.Genres ?? new List<Genre>()).Select(g => g.Name).Distinct().OrderBy(n => n).ToList(),
-                        Developers = allGamesInLibrary.SelectMany(g => g.Developers ?? new List<Company>()).Select(d => d.Name).Distinct().OrderBy(n => n).ToList(),
-                        Publishers = allGamesInLibrary.SelectMany(g => g.Publishers ?? new List<Company>()).Select(p => p.Name).Distinct().OrderBy(n => n).ToList(),
-                        Features = allGamesInLibrary.SelectMany(g => g.Features ?? new List<GameFeature>()).Select(f => f.Name).Distinct().OrderBy(n => n).ToList(),
-                        Tags = allGamesInLibrary.SelectMany(g => g.Tags ?? new List<Tag>()).Select(t => t.Name).Distinct().OrderBy(n => n).ToList(),
-                        Series = allGamesInLibrary.SelectMany(g => g.Series ?? new List<Series>()).Select(s => s.Name).Distinct().OrderBy(n => n).ToList(),
-                        AgeRatings = allGamesInLibrary.SelectMany(g => g.AgeRatings ?? new List<AgeRating>()).Select(a => a.Name).Distinct().OrderBy(n => n).ToList(),
-                        Regions = allGamesInLibrary.SelectMany(g => g.Regions ?? new List<Region>()).Select(r => r.Name).Distinct().OrderBy(n => n).ToList(),
-                        Categories = allGamesInLibrary.SelectMany(g => g.Categories ?? new List<Category>()).Select(c => c.Name).Distinct().OrderBy(n => n).ToList()
-                    };
+                    payload.FilterOptions = filterOptions;
 
                     ulong maxPlaytimeSeconds = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.Playtime) : 0;
                     ulong maxInstallSizeBytes = allGamesInLibrary.Any() ? allGamesInLibrary.Max(g => g.InstallSize ?? 0) : 0;
@@ -503,30 +484,49 @@ namespace PlayniteGo
                     payload.FilterOptions.InstallSizeRange = new RangeData { LowerBound = 0, UpperBound = Math.Max(1, maxInstallSizeGb) };
                     payload.FilterOptions.ReleaseYearRange = new RangeData { LowerBound = minReleaseYear, UpperBound = maxReleaseYear };
 
-                    // --- Game Data Processing ---
                     args.ProgressMaxValue = gamesToProcess.Count;
                     args.IsIndeterminate = false;
                     var processedGames = new ConcurrentBag<GameExport>();
                     int progress = 0;
 
-                    Parallel.ForEach(gamesToProcess, (game) =>
-                    {
-                        if (args.CancelToken.IsCancellationRequested) return;
-                        try 
-                        {
-                            // --- CHANGED: Call EnsureImageInCache instead of ProcessAndCopy ---
-                            var gameExport = CreateGameExport(game, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds, hltbManager);
-                            if (gameExport != null) processedGames.Add(gameExport);
-                        }
-                        catch (Exception ex)
-                        {
-                            logger.Error(ex, $"Failed to export game: {game.Name}");
-                        }
+                    // OPTIMIZATION: Use Partitioner for better load balancing
+                    var partitioner = Partitioner.Create(gamesToProcess, true);
 
-                        Interlocked.Increment(ref progress);
-                        args.CurrentProgressValue = progress;
-                        args.Text = $"Processing: {game.Name} ({progress}/{gamesToProcess.Count})";
-                    });
+                    // OPTIMIZATION: Configure Parallel options for responsive cancellation
+                    var parallelOptions = new ParallelOptions
+                    {
+                        CancellationToken = args.CancelToken,
+                        MaxDegreeOfParallelism = Environment.ProcessorCount
+                    };
+
+                    try 
+                    {
+                        Parallel.ForEach(partitioner, parallelOptions, (game) =>
+                        {
+                            // Loop body handles its own inner exceptions, but Parallel.ForEach throws if cancelled via options
+                            if (parallelOptions.CancellationToken.IsCancellationRequested) return;
+
+                            try 
+                            {
+                                var gameExport = CreateGameExport(game, imageCacheDir, currentIds, hltbManager);
+                                if (gameExport != null) processedGames.Add(gameExport);
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.Error(ex, $"Failed to export game: {game.Name}");
+                            }
+
+                            Interlocked.Increment(ref progress);
+                            args.CurrentProgressValue = progress;
+                            args.Text = $"Processing: {game.Name} ({progress}/{gamesToProcess.Count})";
+                        });
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // User cancelled, suppress error and return partial success or just exit
+                        logger.Info("Export cancelled by user.");
+                        return;
+                    }
 
                     if (args.CancelToken.IsCancellationRequested) return;
 
@@ -535,16 +535,15 @@ namespace PlayniteGo
                     if (payload.Games != null) payload.Games = processedGames.OrderBy(g => g.Name).ToList();
                     if (payload.UpdatedGames != null) payload.UpdatedGames = processedGames.OrderBy(g => g.Name).ToList();
 
-                    // --- NEW: DIRECT ZIP STREAMING ---
                     args.Text = "Writing Archive (Streaming)...";
                     args.IsIndeterminate = true;
                     
                     if (File.Exists(exportZipPath)) File.Delete(exportZipPath);
 
-                    using (var zipToOpen = new FileStream(exportZipPath, FileMode.Create))
+                    // OPTIMIZATION: Use larger buffer (128KB) for ZIP file writing to reduce disk I/O overhead
+                    using (var zipToOpen = new FileStream(exportZipPath, FileMode.Create, FileAccess.Write, FileShare.None, 131072))
                     using (var archive = new ZipArchive(zipToOpen, ZipArchiveMode.Create))
                     {
-                        // 1. Write library.json
                         var jsonEntry = archive.CreateEntry("library.json", CompressionLevel.Fastest);
                         using (var writer = new StreamWriter(jsonEntry.Open()))
                         {
@@ -552,24 +551,22 @@ namespace PlayniteGo
                             writer.Write(jsonContent);
                         }
 
-                        // 2. Stream Images
                         var gamesList = (payload.Games ?? new List<GameExport>()).Concat(payload.UpdatedGames ?? new List<GameExport>()).ToList();
                         int imgProgress = 0;
                         args.ProgressMaxValue = gamesList.Count;
                         args.CurrentProgressValue = 0;
                         args.IsIndeterminate = false;
 
-                        // Local helper to add file
                         void AddImageToZip(string fileName)
                         {
                             if (string.IsNullOrEmpty(fileName)) return;
                             string cachedPath = Path.Combine(imageCacheDir, fileName);
                             if (File.Exists(cachedPath))
                             {
-                                // Optimization: NoCompression for already compressed images
                                 var entry = archive.CreateEntry($"images/{fileName}", CompressionLevel.NoCompression);
                                 using (var entryStream = entry.Open())
-                                using (var fileStream = File.OpenRead(cachedPath))
+                                // OPTIMIZATION: Use larger buffer (64KB) for reading cached images
+                                using (var fileStream = new FileStream(cachedPath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536))
                                 {
                                     fileStream.CopyTo(entryStream);
                                 }
@@ -584,7 +581,7 @@ namespace PlayniteGo
                             AddImageToZip(g.BackgroundImagePath);
 
                             imgProgress++;
-                            if (imgProgress % 10 == 0) // Update UI every 10 items
+                            if (imgProgress % 10 == 0)
                             {
                                 args.CurrentProgressValue = imgProgress;
                                 args.Text = $"Archiving images: {imgProgress}/{gamesList.Count}";
@@ -620,9 +617,6 @@ namespace PlayniteGo
         }
 
         private GameExport CreateGameExport(Game game, string imageCacheDir,
-            Dictionary<string, List<Guid>> developerLookup,
-            Dictionary<string, List<Guid>> publisherLookup,
-            Dictionary<string, List<Guid>> seriesLookup,
             HashSet<Guid> allExportedGameIds,
             HltbManager hltbManager) 
         {
@@ -675,7 +669,6 @@ namespace PlayniteGo
             gameExport.HasUltrawideSupport = CheckSupport(game, UltrawideKeywords);
             gameExport.HasHDRSupport = CheckSupport(game, HdrKeywords);
 
-            // --- NEW: FILL HLTB DATA ---
             if (hltbManager != null)
             {
                 var hltbData = hltbManager.GetTime(game.Name, game.Id);
@@ -688,7 +681,6 @@ namespace PlayniteGo
                     {
                         gameExport.DisplayHltbTime = $"{gameExport.HltbTime}h";
                     }
-                    logger.Debug($"[PlayniteGo] Assigned HLTB to {game.Name}: Time={gameExport.HltbTime}, Display={gameExport.DisplayHltbTime}");
                 }
             }
 
@@ -762,7 +754,6 @@ namespace PlayniteGo
             string sourcePath = PlayniteApi.Database.GetFullFilePath(databasePath);
             var sourceInfo = new FileInfo(sourcePath);
 
-            // Optimization: Check existence using FileInfo
             if (!sourceInfo.Exists)
             {
                 logger.Warn($"Image source file not found: {sourcePath}");
@@ -784,7 +775,6 @@ namespace PlayniteGo
             
             var cachedInfo = new FileInfo(cachedFilePath);
 
-            // Optimization: Check cache using FileInfo to minimize I/O calls
             if (cachedInfo.Exists && cachedInfo.Length > 0 && sourceInfo.LastWriteTimeUtc <= cachedInfo.LastWriteTimeUtc)
             {
                 return targetFileName;
@@ -837,12 +827,30 @@ namespace PlayniteGo
             }
         }
 
-        // --- BUG FIX #2 (REFACTOR): New helper method to generate complete stats for any game collection ---
-        private SummaryStats GenerateSummaryStatsForCollection(List<Game> games)
+        private Dictionary<string, List<Guid>> developerLookup = new Dictionary<string, List<Guid>>();
+        private Dictionary<string, List<Guid>> publisherLookup = new Dictionary<string, List<Guid>>();
+        private Dictionary<string, List<Guid>> seriesLookup = new Dictionary<string, List<Guid>>();
+
+        private SummaryStats GenerateSummaryStatsForCollection(List<Game> games, out ExportedFilterOptions filterOptions)
         {
+            filterOptions = new ExportedFilterOptions
+            {
+                Sources = new List<string>(),
+                CompletionStatuses = new List<string>(),
+                Platforms = new List<string>(),
+                Genres = new List<string>(),
+                Developers = new List<string>(),
+                Publishers = new List<string>(),
+                Features = new List<string>(),
+                Tags = new List<string>(),
+                Series = new List<string>(),
+                AgeRatings = new List<string>(),
+                Regions = new List<string>(),
+                Categories = new List<string>()
+            };
+
             if (games == null || !games.Any()) return new SummaryStats { TotalGames = 0, GamesPlayedCount = 0, TotalPlaytimeHours = 0 };
 
-            // --- Dictionaries for counting categories ---
             var sourceCounts = new Dictionary<string, int>();
             var completionStatusCounts = new Dictionary<string, int>();
             var platformCounts = new Dictionary<string, int>();
@@ -851,6 +859,10 @@ namespace PlayniteGo
             var publisherCounts = new Dictionary<string, int>();
             var featureCounts = new Dictionary<string, int>();
             var tagCounts = new Dictionary<string, int>();
+            var ageRatingCounts = new Dictionary<string, int>();
+            var regionCounts = new Dictionary<string, int>();
+            var categoryCounts = new Dictionary<string, int>();
+            var seriesCounts = new Dictionary<string, int>();
 
             void IncrementCount(Dictionary<string, int> dict, string key)
             {
@@ -859,19 +871,13 @@ namespace PlayniteGo
                 dict[key] = currentCount + 1;
             }
 
-            // --- High/Low trackers ---
             long totalPlaytimeSeconds = 0;
-            Game mostPlayed = null;
-            Game leastPlayed = null;
-            Game oldestRelease = null;
-            Game newestRelease = null;
-            Game oldestAdded = null;
-            Game newestAdded = null;
+            Game mostPlayed = null, leastPlayed = null;
+            Game oldestRelease = null, newestRelease = null;
+            Game oldestAdded = null, newestAdded = null;
 
-            // --- Single loop to gather all data ---
             foreach (var game in games)
             {
-                // Basic stats
                 totalPlaytimeSeconds += (long)game.Playtime;
                 if (game.Playtime > 0)
                 {
@@ -889,18 +895,60 @@ namespace PlayniteGo
                     if (newestAdded == null || game.Added.Value > newestAdded.Added.Value) newestAdded = game;
                 }
 
-                // Category counts
                 if (game.Source != null) IncrementCount(sourceCounts, game.Source.Name);
                 IncrementCount(completionStatusCounts, game.CompletionStatus?.Name ?? "Not Set");
+                
                 if (game.Platforms != null) foreach (var p in game.Platforms) IncrementCount(platformCounts, p.Name);
                 if (game.Genres != null) foreach (var g in game.Genres) IncrementCount(genreCounts, g.Name);
-                if (game.Developers != null) foreach (var d in game.Developers) IncrementCount(developerCounts, d.Name);
-                if (game.Publishers != null) foreach (var p in game.Publishers) IncrementCount(publisherCounts, p.Name);
                 if (game.Features != null) foreach (var f in game.Features) IncrementCount(featureCounts, f.Name);
                 if (game.Tags != null) foreach (var t in game.Tags) IncrementCount(tagCounts, t.Name);
+                if (game.AgeRatings != null) foreach (var ar in game.AgeRatings) IncrementCount(ageRatingCounts, ar.Name);
+                if (game.Regions != null) foreach (var r in game.Regions) IncrementCount(regionCounts, r.Name);
+                if (game.Categories != null) foreach (var c in game.Categories) IncrementCount(categoryCounts, c.Name);
+
+                if (game.Developers != null) 
+                {
+                    foreach (var d in game.Developers) 
+                    {
+                        IncrementCount(developerCounts, d.Name);
+                        if (!developerLookup.ContainsKey(d.Name)) developerLookup[d.Name] = new List<Guid>();
+                        developerLookup[d.Name].Add(game.Id);
+                    }
+                }
+                if (game.Publishers != null) 
+                {
+                    foreach (var p in game.Publishers) 
+                    {
+                        IncrementCount(publisherCounts, p.Name);
+                        if (!publisherLookup.ContainsKey(p.Name)) publisherLookup[p.Name] = new List<Guid>();
+                        publisherLookup[p.Name].Add(game.Id);
+                    }
+                }
+                if (game.Series != null) 
+                {
+                    foreach (var s in game.Series) 
+                    {
+                        IncrementCount(seriesCounts, s.Name);
+                        if (!seriesLookup.ContainsKey(s.Name)) seriesLookup[s.Name] = new List<Guid>();
+                        seriesLookup[s.Name].Add(game.Id);
+                    }
+                }
             }
 
             Func<Dictionary<string, int>, List<CountData>> toCountData = (dict) => dict.Select(kvp => new CountData { Name = kvp.Key, Count = kvp.Value }).OrderByDescending(x => x.Count).ToList();
+
+            filterOptions.Sources = sourceCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.CompletionStatuses = completionStatusCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.Platforms = platformCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.Genres = genreCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.Developers = developerCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.Publishers = publisherCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.Features = featureCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.Tags = tagCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.Series = seriesCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.AgeRatings = ageRatingCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.Regions = regionCounts.Keys.OrderBy(n => n).ToList();
+            filterOptions.Categories = categoryCounts.Keys.OrderBy(n => n).ToList();
 
             return new SummaryStats
             {
@@ -910,7 +958,6 @@ namespace PlayniteGo
                 MostPlayedGame = mostPlayed == null ? null : new GameTime { Name = mostPlayed.Name, Hours = (int)(mostPlayed.Playtime / SecondsInHour) },
                 LeastPlayedGame = leastPlayed == null ? null : new GameTime { Name = leastPlayed.Name, Hours = (int)(leastPlayed.Playtime / SecondsInHour) },
 
-                // Highs & Lows
                 TopCriticRated = games.Where(g => g.CriticScore != null && g.CriticScore > 0).OrderByDescending(g => g.CriticScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CriticScore.Value }).ToList(),
                 BottomCriticRated = games.Where(g => g.CriticScore != null && g.CriticScore > 0).OrderBy(g => g.CriticScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CriticScore.Value }).ToList(),
                 TopCommunityRated = games.Where(g => g.CommunityScore != null && g.CommunityScore > 0).OrderByDescending(g => g.CommunityScore).Take(5).Select(g => new GameScore { Name = g.Name, Score = g.CommunityScore.Value }).ToList(),
@@ -922,7 +969,6 @@ namespace PlayniteGo
                 OldestAdded = oldestAdded == null ? null : new GameScore { Name = oldestAdded.Name, Score = oldestAdded.Added.Value.Year },
                 NewestAdded = newestAdded == null ? null : new GameScore { Name = newestAdded.Name, Score = newestAdded.Added.Value.Year },
 
-                // Count Data
                 GamesByDecade = games.Where(g => g.ReleaseDate != null).GroupBy(g => (g.ReleaseDate.Value.Year / 10) * 10).Select(g => new CountData { Name = $"{g.Key}s", Count = g.Count() }).OrderBy(x => x.Name).ToList(),
                 AllSources = toCountData(sourceCounts),
                 AllPlatforms = toCountData(platformCounts),
@@ -993,33 +1039,38 @@ namespace PlayniteGo
             }
         }
 
+        private static readonly Regex HtmlTagRegex = new Regex("<[^>]+>", RegexOptions.Compiled);
+        private static readonly Regex NewLineRegex = new Regex(@"(\s*\n\s*)+", RegexOptions.Compiled);
+
         private static string StripHtml(string html)
         {
             if (string.IsNullOrEmpty(html)) return null;
 
             string text = html;
-            text = Regex.Replace(text, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
-            text = Regex.Replace(text, @"</(p|div|h[1-6]|li)>", "\n", RegexOptions.IgnoreCase);
-            text = Regex.Replace(text, @"<[^>]+>", string.Empty);
+            text = text.Replace("<br>", "\n").Replace("<br/>", "\n").Replace("<br />", "\n");
+            text = HtmlTagRegex.Replace(text, string.Empty);
             text = WebUtility.HtmlDecode(text);
-            text = Regex.Replace(text, @"(\s*\n\s*)+", "\n");
-            text = text.Trim();
-
-            return text;
+            text = NewLineRegex.Replace(text, "\n");
+            return text.Trim();
         }
 
         private static string FormatPlatformNames(IEnumerable<Platform> platforms)
         {
-            if (platforms == null || !platforms.Any()) return null;
-            return string.Join(", ", platforms.Select(p => {
-                switch (p.Name.ToLowerInvariant())
-                {
-                    case "pc (windows)": return "PC";
-                    case "macintosh": return "Mac";
-                    case "pc (linux)": return "Linux";
-                    default: return p.Name;
-                }
-            }));
+            if (platforms == null) return null;
+            var list = platforms.ToList();
+            if (!list.Any()) return null;
+
+            var sb = new StringBuilder();
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var name = list[i].Name;
+                if (name.Equals("PC (Windows)", StringComparison.OrdinalIgnoreCase)) sb.Append("PC");
+                else if (name.Equals("Macintosh", StringComparison.OrdinalIgnoreCase)) sb.Append("Mac");
+                else if (name.Equals("PC (Linux)", StringComparison.OrdinalIgnoreCase)) sb.Append("Linux");
+                else sb.Append(name);
+            }
+            return sb.ToString();
         }
 
         private static string AbbreviateGenre(string genre)

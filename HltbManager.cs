@@ -12,8 +12,15 @@ namespace PlayniteGo
     public class HltbManager
     {
         private readonly ILogger logger = LogManager.GetLogger();
-        private Dictionary<string, HltbData> _exactMatchCache;
-        private Dictionary<string, HltbData> _normalizedCache;
+        
+        // Static caches to persist data across multiple exports
+        private static Dictionary<string, HltbData> _exactMatchCache;
+        private static Dictionary<string, HltbData> _normalizedCache;
+        private static HashSet<Guid> _localHltbAvailableIds;
+        private static DateTime _csvLastWriteTime = DateTime.MinValue;
+        private static DateTime _localDirLastWriteTime = DateTime.MinValue;
+        private static readonly object _lock = new object();
+
         private const string HltbExtensionId = "e08cd51f-9c9a-4ee3-a094-fde03b55492f";
 
         public string ExtensionsDataPath { get; set; }
@@ -45,86 +52,105 @@ namespace PlayniteGo
 
         public void LoadDatabase(string csvPath)
         {
-            logger.Info($"[PlayniteGo] HltbManager: Attempting to load CSV from: '{csvPath}'");
-
-            _exactMatchCache = new Dictionary<string, HltbData>(StringComparer.OrdinalIgnoreCase);
-            _normalizedCache = new Dictionary<string, HltbData>();
-
-            // --- OPTIMIZATION: Pre-scan local extension directory ---
-            InitializeLocalCache();
-
-            if (!File.Exists(csvPath))
+            lock (_lock)
             {
-                logger.Error($"[PlayniteGo] HltbManager: CRITICAL ERROR - File does not exist at path: {csvPath}");
-                return;
-            }
-
-            try
-            {
-                int rowCount = 0;
-                using (var reader = new StreamReader(csvPath))
+                if (!File.Exists(csvPath))
                 {
-                    // 1. Read Header
-                    var headerLine = reader.ReadLine();
-                    if (string.IsNullOrEmpty(headerLine))
-                    {
-                        logger.Error("[PlayniteGo] HltbManager: CSV file is empty.");
-                        return;
-                    }
-
-                    // FIX: Trim whitespace AND quotes from headers
-                    var headers = ParseCsvLine(headerLine).Select(h => h.Trim().Trim('"').ToLowerInvariant()).ToList();
-                    logger.Info($"[PlayniteGo] HltbManager: Headers found: {string.Join(", ", headers)}");
-
-                    // 2. Identify Columns
-                    int nameIdx = headers.IndexOf("name");
-                    int mainIdx = headers.IndexOf("main_story");
-                    int extraIdx = headers.IndexOf("main_plus_sides");
-                    int compIdx = headers.IndexOf("completionist");
-
-                    if (nameIdx == -1 || mainIdx == -1)
-                    {
-                        logger.Error($"[PlayniteGo] HltbManager: Missing columns! nameIdx={nameIdx}, mainIdx={mainIdx}");
-                        return;
-                    }
-
-                    // 3. Parse Rows
-                    while (!reader.EndOfStream)
-                    {
-                        var line = reader.ReadLine();
-                        if (string.IsNullOrWhiteSpace(line)) continue;
-
-                        var parts = ParseCsvLine(line);
-
-                        if (parts.Count <= mainIdx) continue;
-
-                        string name = parts[nameIdx].Trim('"');
-                        // FIX: Trim quotes from number strings before parsing
-                        int main = ParseHours(parts[mainIdx].Trim('"'));
-                        int extra = (extraIdx != -1 && parts.Count > extraIdx) ? ParseHours(parts[extraIdx].Trim('"')) : 0;
-                        int completeVal = (compIdx != -1 && parts.Count > compIdx) ? ParseHours(parts[compIdx].Trim('"')) : 0;
-
-                        var data = new HltbData
-                        {
-                            MainStory = main,
-                            MainExtra = extra,
-                            Completionist = completeVal
-                        };
-
-                        if (!_exactMatchCache.ContainsKey(name)) _exactMatchCache[name] = data;
-
-                        string normKey = NormalizeGameName(name);
-                        if (!string.IsNullOrEmpty(normKey) && !_normalizedCache.ContainsKey(normKey))
-                            _normalizedCache[normKey] = data;
-
-                        rowCount++;
-                    }
+                    logger.Error($"[PlayniteGo] HltbManager: CRITICAL ERROR - File does not exist at path: {csvPath}");
+                    return;
                 }
-                logger.Info($"[PlayniteGo] HltbManager: Successfully loaded {rowCount} rows. Cache size: {_exactMatchCache.Count}");
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex, "[PlayniteGo] HltbManager: Exception while loading CSV.");
+
+                // Check if CSV has been modified
+                var currentCsvTime = File.GetLastWriteTimeUtc(csvPath);
+                bool csvChanged = currentCsvTime != _csvLastWriteTime;
+
+                // --- OPTIMIZATION: Pre-scan local extension directory ---
+                // We pass true if CSV changed to force local cache refresh just in case, 
+                // though they are technically independent.
+                InitializeLocalCache(csvChanged);
+
+                if (_exactMatchCache != null && _exactMatchCache.Count > 0 && !csvChanged)
+                {
+                    logger.Info("[PlayniteGo] HltbManager: Database already loaded and file unchanged. Skipping reload.");
+                    return;
+                }
+
+                logger.Info($"[PlayniteGo] HltbManager: Loading CSV (Changed: {csvChanged}). Path: '{csvPath}'");
+
+                // Reset caches
+                _exactMatchCache = new Dictionary<string, HltbData>(StringComparer.OrdinalIgnoreCase);
+                _normalizedCache = new Dictionary<string, HltbData>();
+                _csvLastWriteTime = currentCsvTime;
+
+                try
+                {
+                    int rowCount = 0;
+                    using (var reader = new StreamReader(csvPath))
+                    {
+                        // 1. Read Header
+                        var headerLine = reader.ReadLine();
+                        if (string.IsNullOrEmpty(headerLine))
+                        {
+                            logger.Error("[PlayniteGo] HltbManager: CSV file is empty.");
+                            return;
+                        }
+
+                        // FIX: Trim whitespace AND quotes from headers
+                        var headers = ParseCsvLine(headerLine).Select(h => h.Trim().Trim('"').ToLowerInvariant()).ToList();
+                        logger.Info($"[PlayniteGo] HltbManager: Headers found: {string.Join(", ", headers)}");
+
+                        // 2. Identify Columns
+                        int nameIdx = headers.IndexOf("name");
+                        int mainIdx = headers.IndexOf("main_story");
+                        int extraIdx = headers.IndexOf("main_plus_sides");
+                        int compIdx = headers.IndexOf("completionist");
+
+                        if (nameIdx == -1 || mainIdx == -1)
+                        {
+                            logger.Error($"[PlayniteGo] HltbManager: Missing columns! nameIdx={nameIdx}, mainIdx={mainIdx}");
+                            return;
+                        }
+
+                        // 3. Parse Rows
+                        while (!reader.EndOfStream)
+                        {
+                            var line = reader.ReadLine();
+                            if (string.IsNullOrWhiteSpace(line)) continue;
+
+                            var parts = ParseCsvLine(line);
+
+                            if (parts.Count <= mainIdx) continue;
+
+                            string name = parts[nameIdx].Trim('"');
+                            // FIX: Trim quotes from number strings before parsing
+                            int main = ParseHours(parts[mainIdx].Trim('"'));
+                            int extra = (extraIdx != -1 && parts.Count > extraIdx) ? ParseHours(parts[extraIdx].Trim('"')) : 0;
+                            int completeVal = (compIdx != -1 && parts.Count > compIdx) ? ParseHours(parts[compIdx].Trim('"')) : 0;
+
+                            var data = new HltbData
+                            {
+                                MainStory = main,
+                                MainExtra = extra,
+                                Completionist = completeVal
+                            };
+
+                            if (!_exactMatchCache.ContainsKey(name)) _exactMatchCache[name] = data;
+
+                            string normKey = NormalizeGameName(name);
+                            if (!string.IsNullOrEmpty(normKey) && !_normalizedCache.ContainsKey(normKey))
+                                _normalizedCache[normKey] = data;
+
+                            rowCount++;
+                        }
+                    }
+                    logger.Info($"[PlayniteGo] HltbManager: Successfully loaded {rowCount} rows. Cache size: {_exactMatchCache.Count}");
+                }
+                catch (Exception ex)
+                {
+                    logger.Error(ex, "[PlayniteGo] HltbManager: Exception while loading CSV.");
+                    // Invalidate timestamp on error so we try again next time
+                    _csvLastWriteTime = DateTime.MinValue;
+                }
             }
         }
 
@@ -151,34 +177,39 @@ namespace PlayniteGo
             return result;
         }
 
-        private HashSet<Guid> _localHltbAvailableIds;
-
-        private void InitializeLocalCache()
+        private void InitializeLocalCache(bool forceRefresh = false)
         {
-            _localHltbAvailableIds = new HashSet<Guid>();
             if (string.IsNullOrEmpty(ExtensionsDataPath)) return;
+            
+            string dirPath = Path.Combine(ExtensionsDataPath, HltbExtensionId, "HowLongToBeat");
+            if (!Directory.Exists(dirPath)) return;
+
+            var currentDirTime = Directory.GetLastWriteTimeUtc(dirPath);
+            bool dirChanged = currentDirTime != _localDirLastWriteTime;
+
+            if (_localHltbAvailableIds != null && !dirChanged && !forceRefresh) return;
+
+            logger.Info("[PlayniteGo] HltbManager: Refreshing local HLTB cache...");
+            _localHltbAvailableIds = new HashSet<Guid>();
+            _localDirLastWriteTime = currentDirTime;
 
             try 
             {
-                string dirPath = Path.Combine(ExtensionsDataPath, HltbExtensionId, "HowLongToBeat");
-                if (Directory.Exists(dirPath))
+                // Enumerate files is faster than GetFiles for large directories as we don't need the array immediately
+                // But we want to store IDs.
+                foreach (var file in Directory.EnumerateFiles(dirPath, "*.json"))
                 {
-                    // Enumerate files is faster than GetFiles for large directories as we don't need the array immediately
-                    // But we want to store IDs.
-                    var files = Directory.GetFiles(dirPath, "*.json");
-                    foreach (var file in files)
+                    if (Guid.TryParse(Path.GetFileNameWithoutExtension(file), out Guid id))
                     {
-                        if (Guid.TryParse(Path.GetFileNameWithoutExtension(file), out Guid id))
-                        {
-                            _localHltbAvailableIds.Add(id);
-                        }
+                        _localHltbAvailableIds.Add(id);
                     }
-                    logger.Info($"[PlayniteGo] HltbManager: Found {_localHltbAvailableIds.Count} local HLTB data files.");
                 }
+                logger.Info($"[PlayniteGo] HltbManager: Found {_localHltbAvailableIds.Count} local HLTB data files.");
             }
             catch (Exception ex)
             {
                 logger.Error(ex, "[PlayniteGo] HltbManager: Failed to initialize local HLTB cache.");
+                _localDirLastWriteTime = DateTime.MinValue;
             }
         }
 
@@ -196,14 +227,14 @@ namespace PlayniteGo
         {
             if (_exactMatchCache == null)
             {
-                logger.Warn($"[PlayniteGo] HLTB: Lookup for '{gameName}' failed because database is not initialized.");
+                // This might happen if LoadDatabase failed or wasn't called.
+                // Depending on flow, we might want to warn or just return null.
                 return null;
             }
 
             // 1. Try Exact Match (CSV)
             if (_exactMatchCache.TryGetValue(gameName, out var data))
             {
-                logger.Info($"[PlayniteGo] HLTB: Exact CSV match found for '{gameName}' (Main: {data.MainStory}h)");
                 return data;
             }
 
@@ -211,7 +242,6 @@ namespace PlayniteGo
             var normKey = NormalizeGameName(gameName);
             if (!string.IsNullOrEmpty(normKey) && _normalizedCache.TryGetValue(normKey, out var normData))
             {
-                logger.Info($"[PlayniteGo] HLTB: Normalized CSV match found for '{gameName}' -> '{normKey}' (Main: {normData.MainStory}h)");
                 return normData;
             }
 
@@ -221,12 +251,10 @@ namespace PlayniteGo
                 var extData = GetTimeFromLocalExtension(gameId.Value);
                 if (extData != null)
                 {
-                    logger.Info($"[PlayniteGo] HLTB: Local Extension match found for '{gameName}' ({gameId}) (Main: {extData.MainStory}h)");
                     return extData;
                 }
             }
 
-            logger.Debug($"[PlayniteGo] HLTB: No match found for '{gameName}'");
             return null;
         }
 
@@ -262,9 +290,22 @@ namespace PlayniteGo
         private string NormalizeGameName(string name)
         {
             if (string.IsNullOrEmpty(name)) return "";
-            string outName = name.ToLowerInvariant();
-            if (outName.StartsWith("the ")) outName = outName.Substring(4);
-            return Regex.Replace(outName, "[^a-z0-9]", "");
+            
+            // Optimization: Use StringBuilder instead of Regex for cleaner hot-path execution
+            // Logic: Lowercase, remove "the " prefix, remove non-alphanumeric
+            
+            var lower = name.ToLowerInvariant();
+            if (lower.StartsWith("the ")) lower = lower.Substring(4);
+
+            var sb = new System.Text.StringBuilder(lower.Length);
+            foreach (char c in lower)
+            {
+                if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
         }
     }
 }
