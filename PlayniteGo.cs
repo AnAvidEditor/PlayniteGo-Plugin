@@ -380,13 +380,12 @@ namespace PlayniteGo
         private bool ProcessAndZip(List<Game> gamesToProcess, ExportPayload payload, string exportZipPath, HashSet<Guid> currentIds, string progressMessage, DateTime exportDate)
         {
             bool wasSuccess = false;
-            var tempDir = Path.Combine(Path.GetTempPath(), "PlayniteExport_" + Guid.NewGuid());
-            var imagesDir = Path.Combine(tempDir, "images");
+            
+            // --- OPTIMIZATION: REMOVED TEMP DIR ---
+            // We no longer copy files to a temp directory. We stream directly from Cache to Zip.
 
             try
             {
-                Directory.CreateDirectory(imagesDir);
-
                 var imageCacheDir = Path.Combine(GetPluginUserDataPath(), "ImageCache");
                 var cacheSettingsFile = Path.Combine(imageCacheDir, "cache.settings.json");
                 Directory.CreateDirectory(imageCacheDir);
@@ -437,14 +436,17 @@ namespace PlayniteGo
 
                 PlayniteApi.Dialogs.ActivateGlobalProgress(args =>
                 {
+                    // --- NEW: Consolidate status to prevent UI flash ---
+                    args.Text = "Preparing export data...";
+                    args.IsIndeterminate = true;
+
                     // --- NEW: LOAD DATABASE ---
-                    args.Text = "Loading HowLongToBeat Database...";
                     hltbManager.LoadDatabase(hltbPath);
 
                     var allGamesInLibrary = PlayniteApi.Database.Games.ToList();
 
                     // --- BUG FIX #2: Refactored stats generation to be complete for all categories ---
-                    args.Text = $"Analyzing {allGamesInLibrary.Count} games for stats and filters...";
+                    // args.Text = $"Analyzing {allGamesInLibrary.Count} games for stats and filters..."; // Commented out to prevent flash
                     var playedGames = allGamesInLibrary.Where(g => g.Playtime > 0).ToList();
                     var unplayedGames = allGamesInLibrary.Where(g => g.Playtime <= 0).ToList();
 
@@ -512,8 +514,8 @@ namespace PlayniteGo
                         if (args.CancelToken.IsCancellationRequested) return;
                         try 
                         {
-                            // --- CHANGED: PASS hltbManager HERE ---
-                            var gameExport = CreateGameExport(game, imagesDir, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds, hltbManager);
+                            // --- CHANGED: Call EnsureImageInCache instead of ProcessAndCopy ---
+                            var gameExport = CreateGameExport(game, imageCacheDir, developerLookup, publisherLookup, seriesLookup, currentIds, hltbManager);
                             if (gameExport != null) processedGames.Add(gameExport);
                         }
                         catch (Exception ex)
@@ -533,15 +535,62 @@ namespace PlayniteGo
                     if (payload.Games != null) payload.Games = processedGames.OrderBy(g => g.Name).ToList();
                     if (payload.UpdatedGames != null) payload.UpdatedGames = processedGames.OrderBy(g => g.Name).ToList();
 
-                    var jsonContent = Serialization.ToJson(payload, true);
-                    File.WriteAllText(Path.Combine(tempDir, "library.json"), jsonContent);
-
-                    if (args.CancelToken.IsCancellationRequested) return;
-
-                    args.Text = "Compressing files...";
+                    // --- NEW: DIRECT ZIP STREAMING ---
+                    args.Text = "Writing Archive (Streaming)...";
                     args.IsIndeterminate = true;
+                    
                     if (File.Exists(exportZipPath)) File.Delete(exportZipPath);
-                    ZipFile.CreateFromDirectory(tempDir, exportZipPath, CompressionLevel.Optimal, false);
+
+                    using (var zipToOpen = new FileStream(exportZipPath, FileMode.Create))
+                    using (var archive = new ZipArchive(zipToOpen, ZipArchiveMode.Create))
+                    {
+                        // 1. Write library.json
+                        var jsonEntry = archive.CreateEntry("library.json", CompressionLevel.Fastest);
+                        using (var writer = new StreamWriter(jsonEntry.Open()))
+                        {
+                            var jsonContent = Serialization.ToJson(payload, true);
+                            writer.Write(jsonContent);
+                        }
+
+                        // 2. Stream Images
+                        var gamesList = (payload.Games ?? new List<GameExport>()).Concat(payload.UpdatedGames ?? new List<GameExport>()).ToList();
+                        int imgProgress = 0;
+                        args.ProgressMaxValue = gamesList.Count;
+                        args.CurrentProgressValue = 0;
+                        args.IsIndeterminate = false;
+
+                        // Local helper to add file
+                        void AddImageToZip(string fileName)
+                        {
+                            if (string.IsNullOrEmpty(fileName)) return;
+                            string cachedPath = Path.Combine(imageCacheDir, fileName);
+                            if (File.Exists(cachedPath))
+                            {
+                                // Optimization: NoCompression for already compressed images
+                                var entry = archive.CreateEntry($"images/{fileName}", CompressionLevel.NoCompression);
+                                using (var entryStream = entry.Open())
+                                using (var fileStream = File.OpenRead(cachedPath))
+                                {
+                                    fileStream.CopyTo(entryStream);
+                                }
+                            }
+                        }
+
+                        foreach (var g in gamesList)
+                        {
+                            if (args.CancelToken.IsCancellationRequested) break;
+
+                            AddImageToZip(g.CoverImagePath);
+                            AddImageToZip(g.BackgroundImagePath);
+
+                            imgProgress++;
+                            if (imgProgress % 10 == 0) // Update UI every 10 items
+                            {
+                                args.CurrentProgressValue = imgProgress;
+                                args.Text = $"Archiving images: {imgProgress}/{gamesList.Count}";
+                            }
+                        }
+                    }
 
                     if (args.CancelToken.IsCancellationRequested) return;
 
@@ -556,7 +605,7 @@ namespace PlayniteGo
                 logger.Error(ioEx, "Export failed due to a file system error.");
                 PlayniteApi.MainView.UIDispatcher.Invoke(() => {
                     PlayniteApi.Dialogs.ShowErrorMessage(
-                        $"Export failed. A file system error occurred, which could be due to a lack of disk space or an issue with the destination folder.\n\nDetails: {ioEx.Message}",
+                        $"Export failed. A file system error occurred.\n\nDetails: {ioEx.Message}",
                         "File Error");
                 });
                 wasSuccess = false;
@@ -567,19 +616,15 @@ namespace PlayniteGo
                 PlayniteApi.MainView.UIDispatcher.Invoke(() => { PlayniteApi.Dialogs.ShowErrorMessage($"Export failed: {ex.Message}", "Error"); });
                 wasSuccess = false;
             }
-            finally
-            {
-                if (Directory.Exists(tempDir)) { try { Directory.Delete(tempDir, true); } catch (Exception ex) { logger.Error(ex, "Failed to cleanup temp directory."); } }
-            }
             return wasSuccess;
         }
 
-        private GameExport CreateGameExport(Game game, string tempImagesDir, string imageCacheDir,
+        private GameExport CreateGameExport(Game game, string imageCacheDir,
             Dictionary<string, List<Guid>> developerLookup,
             Dictionary<string, List<Guid>> publisherLookup,
             Dictionary<string, List<Guid>> seriesLookup,
             HashSet<Guid> allExportedGameIds,
-            HltbManager hltbManager) // <--- ADDED PARAMETER
+            HltbManager hltbManager) 
         {
             var gameExport = new GameExport
             {
@@ -612,8 +657,8 @@ namespace PlayniteGo
                 Tags = game.Tags?.Select(t => t.Name).ToList() ?? new List<string>(),
                 Categories = game.Categories?.Select(c => c.Name).ToList() ?? new List<string>(),
                 Regions = game.Regions?.Select(r => r.Name).ToList() ?? new List<string>(),
-                CoverImagePath = ProcessAndCopyLocalImage(game, game.CoverImage, tempImagesDir, imageCacheDir, ImageType.Cover),
-                BackgroundImagePath = ProcessAndCopyLocalImage(game, game.BackgroundImage, tempImagesDir, imageCacheDir, ImageType.Background),
+                CoverImagePath = EnsureImageInCache(game, game.CoverImage, imageCacheDir, ImageType.Cover),
+                BackgroundImagePath = EnsureImageInCache(game, game.BackgroundImage, imageCacheDir, ImageType.Background),
             };
 
             gameExport.PlainTextDescription = StripHtml(game.Description);
@@ -707,7 +752,7 @@ namespace PlayniteGo
             return gameExport;
         }
 
-        private string ProcessAndCopyLocalImage(Game game, string databasePath, string tempImagesDir, string imageCacheDir, ImageType type)
+        private string EnsureImageInCache(Game game, string databasePath, string imageCacheDir, ImageType type)
         {
             if (string.IsNullOrEmpty(databasePath) || databasePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
@@ -736,22 +781,13 @@ namespace PlayniteGo
 
             string targetFileName = $"{game.Id}_{type}{extension}";
             string cachedFilePath = Path.Combine(imageCacheDir, targetFileName);
-            string finalExportPath = Path.Combine(tempImagesDir, targetFileName);
-
+            
             var cachedInfo = new FileInfo(cachedFilePath);
 
-            // Optimization: Check cache using FileInfo to minimize I/O calls (Exists, Length, Time all from one metadata fetch)
+            // Optimization: Check cache using FileInfo to minimize I/O calls
             if (cachedInfo.Exists && cachedInfo.Length > 0 && sourceInfo.LastWriteTimeUtc <= cachedInfo.LastWriteTimeUtc)
             {
-                try
-                {
-                    File.Copy(cachedFilePath, finalExportPath, true);
-                    return targetFileName;
-                }
-                catch (Exception ex)
-                {
-                    logger.Error(ex, $"Failed to copy from cache. File: {cachedFilePath}");
-                }
+                return targetFileName;
             }
 
             try
@@ -792,7 +828,6 @@ namespace PlayniteGo
                     }
                 }
 
-                File.Copy(cachedFilePath, finalExportPath, true);
                 return targetFileName;
             }
             catch (Exception ex)
